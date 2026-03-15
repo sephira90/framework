@@ -1,0 +1,16 @@
+parameters:
+    level: 10
+    paths:
+        - app
+        - bootstrap
+        - config
+        - public
+        - routes
+        - src
+        - tests
+        - tools
+        - qa.php
+        - QaRunner.php
+    tmpDir: var/phpstan
+    reportUnmatchedIgnoredErrors: true
+    treatPhpDocTypesAsCertain: true

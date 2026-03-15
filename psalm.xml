@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<psalm
+    errorLevel="1"
+    resolveFromConfigFile="true"
+    findUnusedCode="true"
+    findUnusedVariablesAndParams="true"
+    findUnusedBaselineEntry="true"
+    xsi:noNamespaceSchemaLocation="vendor/vimeo/psalm/config.xsd"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+>
+    <projectFiles>
+        <directory name="app"/>
+        <directory name="bootstrap"/>
+        <directory name="config"/>
+        <directory name="public"/>
+        <directory name="routes"/>
+        <directory name="src"/>
+        <directory name="tests"/>
+        <directory name="tools"/>
+        <file name="qa.php"/>
+        <file name="QaRunner.php"/>
+        <ignoreFiles>
+            <directory name="vendor"/>
+            <directory name="artifacts"/>
+            <directory name="var"/>
+            <directory name=".git"/>
+            <directory name=".osp"/>
+        </ignoreFiles>
+    </projectFiles>
+</psalm>
