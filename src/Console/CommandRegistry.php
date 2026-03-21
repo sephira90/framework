@@ -4,23 +4,27 @@ declare(strict_types=1);
 
 namespace Framework\Console;
 
-use Framework\Foundation\Bootstrap\BootstrapStateException;
+use Framework\Foundation\Bootstrap\SingleAssignmentHolder;
 
 /**
  * Single-assignment registry зарегистрированных console commands.
  */
 final class CommandRegistry
 {
-    /** @var array<string, class-string<CommandInterface>>|null */
-    private ?array $commands = null;
+    /** @var SingleAssignmentHolder<array<string, class-string<CommandInterface>>> */
+    private SingleAssignmentHolder $commands;
+
+    public function __construct()
+    {
+        /** @var SingleAssignmentHolder<array<string, class-string<CommandInterface>>> $commands */
+        $commands = new SingleAssignmentHolder('Command registry');
+
+        $this->commands = $commands;
+    }
 
     public function initialize(CommandCollection $collection): void
     {
-        if ($this->commands !== null) {
-            throw new BootstrapStateException('Command registry has already been initialized.');
-        }
-
-        $this->commands = $collection->all();
+        $this->commands->initialize($collection->all());
     }
 
     /**
@@ -28,11 +32,9 @@ final class CommandRegistry
      */
     public function commandNames(): array
     {
-        if ($this->commands === null) {
-            throw new BootstrapStateException('Command registry has not been initialized yet.');
-        }
+        $commands = $this->commands->get();
 
-        return array_keys($this->commands);
+        return array_keys($commands);
     }
 
     /**
@@ -40,15 +42,13 @@ final class CommandRegistry
      */
     public function commandHandler(string $name): ?string
     {
-        if ($this->commands === null) {
-            throw new BootstrapStateException('Command registry has not been initialized yet.');
-        }
+        $commands = $this->commands->get();
 
-        return $this->commands[$name] ?? null;
+        return $commands[$name] ?? null;
     }
 
     public function isInitialized(): bool
     {
-        return $this->commands !== null;
+        return $this->commands->isInitialized();
     }
 }

@@ -6,8 +6,11 @@ namespace Framework\Container;
 
 use Closure;
 use InvalidArgumentException;
+use Psr\Container\ContainerInterface;
 use ReflectionClass;
 use ReflectionFunction;
+use ReflectionNamedType;
+use ReflectionParameter;
 
 /**
  * Регистрационный слой для container definitions.
@@ -106,24 +109,55 @@ final class ContainerBuilder
         return new ServiceDefinition(
             $factory,
             $shared,
-            self::factoryRequiresContainer($id, $factory)
+            self::analyzeFactory($id, $factory)
         );
     }
 
-    private static function factoryRequiresContainer(string $id, Closure $factory): bool
+    private static function analyzeFactory(string $id, Closure $factory): bool
     {
         $reflection = new ReflectionFunction($factory);
-        $requiredParameters = $reflection->getNumberOfRequiredParameters();
         $totalParameters = $reflection->getNumberOfParameters();
 
-        if ($requiredParameters > 1 || $totalParameters > 1) {
+        if ($totalParameters > 1) {
             throw new InvalidArgumentException(sprintf(
-                'Service [%s] factories must accept zero or one ContainerInterface argument.',
+                'Service [%s] factories must accept zero or one ContainerInterface-compatible argument.',
                 $id
             ));
         }
 
-        return $requiredParameters === 1;
+        if ($totalParameters === 0) {
+            return false;
+        }
+
+        $parameters = $reflection->getParameters();
+        $parameter = $parameters[0] ?? null;
+
+        if ($parameter === null) {
+            throw new InvalidArgumentException(sprintf(
+                'Service [%s] factories must accept zero or one ContainerInterface-compatible argument.',
+                $id
+            ));
+        }
+
+        if (!self::parameterAcceptsContainer($parameter)) {
+            throw new InvalidArgumentException(sprintf(
+                'Service [%s] factories must accept zero or one ContainerInterface-compatible argument.',
+                $id
+            ));
+        }
+
+        return true;
+    }
+
+    private static function parameterAcceptsContainer(ReflectionParameter $parameter): bool
+    {
+        $type = $parameter->getType();
+
+        if (!$type instanceof ReflectionNamedType || $type->isBuiltin()) {
+            return false;
+        }
+
+        return is_a($type->getName(), ContainerInterface::class, true);
     }
 
     /**

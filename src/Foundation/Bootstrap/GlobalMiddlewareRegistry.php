@@ -11,19 +11,23 @@ use Psr\Http\Server\MiddlewareInterface;
  */
 final class GlobalMiddlewareRegistry
 {
-    /** @var list<class-string<MiddlewareInterface>|MiddlewareInterface>|null */
-    private ?array $middleware = null;
+    /** @var SingleAssignmentHolder<list<class-string<MiddlewareInterface>|MiddlewareInterface>> */
+    private SingleAssignmentHolder $middleware;
+
+    public function __construct()
+    {
+        /** @var SingleAssignmentHolder<list<class-string<MiddlewareInterface>|MiddlewareInterface>> $middleware */
+        $middleware = new SingleAssignmentHolder('Global middleware registry');
+
+        $this->middleware = $middleware;
+    }
 
     /**
      * @param list<class-string<MiddlewareInterface>|MiddlewareInterface> $middleware
      */
     public function initialize(array $middleware): void
     {
-        if ($this->middleware !== null) {
-            throw new BootstrapStateException('Global middleware registry has already been initialized.');
-        }
-
-        $this->middleware = $middleware;
+        $this->middleware->initialize($middleware);
     }
 
     /**
@@ -31,15 +35,13 @@ final class GlobalMiddlewareRegistry
      */
     public function middleware(): array
     {
-        if ($this->middleware === null) {
-            throw new BootstrapStateException('Global middleware registry has not been initialized yet.');
-        }
+        $middleware = $this->middleware->get();
 
-        return $this->middleware;
+        return $middleware;
     }
 
     public function isInitialized(): bool
     {
-        return $this->middleware !== null;
+        return $this->middleware->isInitialized();
     }
 }

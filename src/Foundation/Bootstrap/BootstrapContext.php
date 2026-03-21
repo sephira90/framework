@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Framework\Foundation\Bootstrap;
 
 use Framework\Config\Config;
-use Framework\Container\Container;
+use Psr\Container\ContainerInterface;
 
 /**
  * Post-container bootstrap context.
@@ -15,7 +15,7 @@ final readonly class BootstrapContext
     public function __construct(
         private string $basePath,
         private Config $config,
-        private Container $container,
+        private ContainerInterface $container,
     ) {
     }
 
@@ -29,7 +29,7 @@ final readonly class BootstrapContext
         return $this->config;
     }
 
-    public function container(): Container
+    public function container(): ContainerInterface
     {
         return $this->container;
     }

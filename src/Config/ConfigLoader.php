@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Framework\Config;
 
+use Framework\Support\IsolatedFileRequirer;
+
 /**
  * Загружает конфигурацию приложения из одного файла или из config directory.
  *
@@ -82,7 +84,7 @@ final class ConfigLoader
      */
     private static function loadFile(string $path): array
     {
-        $config = self::requireFile($path);
+        $config = IsolatedFileRequirer::require($path);
 
         if (!is_array($config)) {
             throw new InvalidConfigurationException(sprintf('Configuration file [%s] must return an array.', $path));
@@ -131,12 +133,14 @@ final class ConfigLoader
      */
     private static function resolveEnvironment(array $config): ?string
     {
+        /** @var array{app?: mixed} $config */
         $app = $config['app'] ?? null;
 
         if (!is_array($app)) {
             return null;
         }
 
+        /** @var array{env?: mixed} $app */
         return isset($app['env']) && is_string($app['env']) && $app['env'] !== ''
             ? $app['env']
             : null;
@@ -196,17 +200,5 @@ final class ConfigLoader
         }
 
         return $normalized;
-    }
-
-    /**
-     * Изолирует scope подключаемого файла, чтобы config не получал доступ к
-     * локальным переменным метода loader'а.
-     */
-    private static function requireFile(string $path): mixed
-    {
-        return (static function (string $path): mixed {
-            /** @psalm-suppress UnresolvableInclude */
-            return require $path;
-        })($path);
     }
 }

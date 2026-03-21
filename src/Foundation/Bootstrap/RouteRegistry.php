@@ -11,28 +11,31 @@ use Framework\Routing\RouteCollection;
  */
 final class RouteRegistry
 {
-    private ?RouteCollection $routes = null;
+    /** @var SingleAssignmentHolder<RouteCollection> */
+    private SingleAssignmentHolder $routes;
 
-    public function initialize(RouteCollection $routes): void
+    public function __construct()
     {
-        if ($this->routes !== null) {
-            throw new BootstrapStateException('Route registry has already been initialized.');
-        }
+        /** @var SingleAssignmentHolder<RouteCollection> $routes */
+        $routes = new SingleAssignmentHolder('Route registry');
 
         $this->routes = $routes;
     }
 
+    public function initialize(RouteCollection $routes): void
+    {
+        $this->routes->initialize($routes);
+    }
+
     public function routes(): RouteCollection
     {
-        if ($this->routes === null) {
-            throw new BootstrapStateException('Route registry has not been initialized yet.');
-        }
+        $routes = $this->routes->get();
 
-        return $this->routes;
+        return $routes;
     }
 
     public function isInitialized(): bool
     {
-        return $this->routes !== null;
+        return $this->routes->isInitialized();
     }
 }

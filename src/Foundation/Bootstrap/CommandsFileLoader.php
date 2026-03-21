@@ -8,6 +8,7 @@ use Framework\Config\Config;
 use Framework\Config\InvalidConfigurationException;
 use Framework\Console\CommandCollection;
 use Framework\Console\CommandCollector;
+use Framework\Support\IsolatedFileRequirer;
 
 /**
  * Загружает command collection из configured commands file.
@@ -16,21 +17,14 @@ final class CommandsFileLoader
 {
     public function load(string $basePath, Config $config): CommandCollection
     {
-        $relativeCommandsPath = $config->get('console.commands', 'commands/console.php');
-
-        if (!is_string($relativeCommandsPath) || $relativeCommandsPath === '') {
-            throw new InvalidConfigurationException('Configuration key [console.commands] must be a non-empty string.');
-        }
-
-        $commandsPath = $basePath
-            . DIRECTORY_SEPARATOR
-            . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $relativeCommandsPath);
-
-        if (!is_file($commandsPath)) {
-            throw new InvalidConfigurationException(sprintf('Commands file [%s] was not found.', $commandsPath));
-        }
-
-        $registrar = $this->requireFile($commandsPath);
+        $commandsPath = ProjectFileResolver::resolveConfiguredFile(
+            $config,
+            'console.commands',
+            'commands/console.php',
+            $basePath,
+            'Commands file'
+        );
+        $registrar = IsolatedFileRequirer::require($commandsPath);
 
         if (!is_callable($registrar)) {
             throw new InvalidConfigurationException(sprintf(
@@ -43,16 +37,5 @@ final class CommandsFileLoader
         $registrar($collector);
 
         return $collector->collection();
-    }
-
-    /**
-     * Изолирует scope commands file от локального состояния loader'а.
-     */
-    private function requireFile(string $path): mixed
-    {
-        return (static function (string $path): mixed {
-            /** @psalm-suppress UnresolvableInclude */
-            return require $path;
-        })($path);
     }
 }

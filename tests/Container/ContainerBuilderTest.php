@@ -9,6 +9,7 @@ use Framework\Container\ContainerBuilder;
 use Framework\Container\ContainerException;
 use Framework\Tests\Support\FrameworkTestCase;
 use InvalidArgumentException;
+use Psr\Container\ContainerInterface;
 use stdClass;
 
 /** @psalm-suppress UnusedClass */
@@ -61,12 +62,38 @@ final class ContainerBuilderTest extends FrameworkTestCase
         self::assertSame($resolved, $container->get('target.service'));
     }
 
+    public function testBuilderPassesContainerToRequiredFactoryParameter(): void
+    {
+        $builder = new ContainerBuilder();
+        $builder->singleton(
+            'container.service',
+            static fn (ContainerInterface $container): ContainerInterface => $container
+        );
+
+        $container = $builder->build();
+
+        self::assertSame($container, $container->get('container.service'));
+    }
+
+    public function testBuilderPassesContainerToOptionalFactoryParameter(): void
+    {
+        $builder = new ContainerBuilder();
+        $builder->singleton(
+            'container.service',
+            static fn (?ContainerInterface $container = null): ?ContainerInterface => $container
+        );
+
+        $container = $builder->build();
+
+        self::assertSame($container, $container->get('container.service'));
+    }
+
     public function testBuilderRejectsFactoriesWithMoreThanOneParameter(): void
     {
         $builder = new ContainerBuilder();
 
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('must accept zero or one ContainerInterface argument');
+        $this->expectExceptionMessage('must accept zero or one ContainerInterface-compatible argument');
 
         $builder->bind(
             'invalid.factory',
@@ -74,6 +101,71 @@ final class ContainerBuilderTest extends FrameworkTestCase
                 unset($first, $second);
 
                 return new stdClass();
+            }
+        );
+    }
+
+    public function testBuilderRejectsFactoriesWithUntypedParameter(): void
+    {
+        $builder = new ContainerBuilder();
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('must accept zero or one ContainerInterface-compatible argument');
+
+        $builder->bind(
+            'invalid.factory',
+            /** @psalm-suppress MissingClosureParamType */
+            static function ($value): stdClass {
+                unset($value);
+
+                return new stdClass();
+            }
+        );
+    }
+
+    public function testBuilderRejectsFactoriesWithBuiltinParameter(): void
+    {
+        $builder = new ContainerBuilder();
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('must accept zero or one ContainerInterface-compatible argument');
+
+        $builder->bind(
+            'invalid.factory',
+            static function (int $value): stdClass {
+                unset($value);
+
+                return new stdClass();
+            }
+        );
+    }
+
+    public function testBuilderRejectsFactoriesWithRequiredNonContainerObjectParameter(): void
+    {
+        $builder = new ContainerBuilder();
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('must accept zero or one ContainerInterface-compatible argument');
+
+        $builder->bind(
+            'invalid.factory',
+            static function (stdClass $value): stdClass {
+                return $value;
+            }
+        );
+    }
+
+    public function testBuilderRejectsFactoriesWithOptionalNonContainerObjectParameter(): void
+    {
+        $builder = new ContainerBuilder();
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('must accept zero or one ContainerInterface-compatible argument');
+
+        $builder->bind(
+            'invalid.factory',
+            static function (?stdClass $value = null): stdClass {
+                return $value ?? new stdClass();
             }
         );
     }
