@@ -11,9 +11,10 @@ use Framework\Foundation\Application;
 use Framework\Foundation\Bootstrap\BootstrapBuilder;
 use Framework\Foundation\Bootstrap\BootstrapContext;
 use Framework\Foundation\Bootstrap\Provider\ConfiguredServicesProvider;
-use Framework\Foundation\Bootstrap\Provider\CoreServicesProvider;
+use Framework\Foundation\Bootstrap\Provider\HttpCoreServicesProvider;
 use Framework\Foundation\Bootstrap\Provider\HttpKernelProvider;
 use Framework\Foundation\Bootstrap\Provider\RoutingServiceProvider;
+use Framework\Foundation\Bootstrap\Provider\SharedServicesProvider;
 use Framework\Foundation\HttpRuntime;
 use Framework\Http\RequestFactory;
 use Framework\Http\ResponseEmitter;
@@ -109,13 +110,15 @@ final class ProviderIntegrationTest extends FrameworkTestCase
     private function registeredProviders(string $basePath, Config $config): array
     {
         $builder = new BootstrapBuilder($basePath, $config, new ContainerBuilder());
-        $core = new CoreServicesProvider();
+        $shared = new SharedServicesProvider();
+        $httpCore = new HttpCoreServicesProvider();
         $configured = new ConfiguredServicesProvider();
         $routing = new RoutingServiceProvider();
         $http = new HttpKernelProvider();
 
-        $core->register($builder);
+        $shared->register($builder);
         $configured->register($builder);
+        $httpCore->register($builder);
         $routing->register($builder);
         $http->register($builder);
 

@@ -9,9 +9,10 @@ use Framework\Config\EnvironmentLoader;
 use Framework\Foundation\Bootstrap\Bootstrapper;
 use Framework\Foundation\Bootstrap\ContainerAccessor;
 use Framework\Foundation\Bootstrap\Provider\ConfiguredServicesProvider;
-use Framework\Foundation\Bootstrap\Provider\CoreServicesProvider;
+use Framework\Foundation\Bootstrap\Provider\HttpCoreServicesProvider;
 use Framework\Foundation\Bootstrap\Provider\HttpKernelProvider;
 use Framework\Foundation\Bootstrap\Provider\RoutingServiceProvider;
+use Framework\Foundation\Bootstrap\Provider\SharedServicesProvider;
 
 /**
  * Тонкий bootstrap-orchestrator framework runtime.
@@ -42,8 +43,9 @@ final class ApplicationFactory
     private static function bootstrapper(): Bootstrapper
     {
         return new Bootstrapper([
-            new CoreServicesProvider(),
+            new SharedServicesProvider(),
             new ConfiguredServicesProvider(),
+            new HttpCoreServicesProvider(),
             new RoutingServiceProvider(),
             new HttpKernelProvider(),
         ]);

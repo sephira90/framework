@@ -14,26 +14,24 @@ use Framework\Http\RequestFactory;
 use Framework\Http\ResponseEmitter;
 use Nyholm\Psr7\Factory\Psr17Factory;
 use Nyholm\Psr7Server\ServerRequestCreator;
+use Override;
 use Psr\Container\ContainerInterface;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\ServerRequestFactoryInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Psr\Http\Message\UploadedFileFactoryInterface;
 use Psr\Http\Message\UriFactoryInterface;
-use Override;
 
 /**
- * Регистрирует core framework services, которые не зависят от app routes.
+ * Регистрирует HTTP-specific core services поверх shared bootstrap state.
  */
-final class CoreServicesProvider implements ServiceProviderInterface
+final class HttpCoreServicesProvider implements ServiceProviderInterface
 {
     #[Override]
     public function register(BootstrapBuilder $builder): void
     {
-        $config = $builder->config();
         $container = $builder->containerBuilder();
 
-        $container->singleton(Config::class, $config);
         $container->singleton(Psr17Factory::class, static fn (): Psr17Factory => new Psr17Factory());
         $container->alias(ResponseFactoryInterface::class, Psr17Factory::class);
         $container->alias(StreamFactoryInterface::class, Psr17Factory::class);
