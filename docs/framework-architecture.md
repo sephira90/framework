@@ -100,6 +100,7 @@
 Отвечает за HTTP route model.
 
 - `Route` — immutable описание маршрута
+- `CompiledRoutePath` — compiled route-template contract for matching, parameter extraction and URL generation
 - `RouteCollection` — ordered collection маршрутов
 - `RouteCollector` — registration API
 - `RouteBuilder` — fluent metadata seam
@@ -155,10 +156,10 @@
 - `ServiceProviderInterface` — register contract
 - `BootableProviderInterface` — optional boot contract
 - `BootstrapBuilder` — pre-container context
-- `BootstrapContext` — post-container context
+- `BootstrapContext` — post-container context c `ContainerInterface`, а не concrete container
 - `ContainerAccessor` — typed accessor поверх `ContainerInterface::get()`
 - `RouteRegistry` / `GlobalMiddlewareRegistry` / `CommandRegistry` — dedicated boot state
-- `RoutesFileLoader` / `CommandsFileLoader` — scope-isolated app registration loaders
+- `RoutesFileLoader` / `CommandsFileLoader` — scope-isolated project-bound app registration loaders
 - `Provider\\*` — fixed internal providers
 
 ### Прикладной слой
@@ -245,6 +246,7 @@
 
 - container explicit-only;
 - alias cycles и service cycles считаются ошибкой;
+- service factory допускает либо zero-argument форму, либо один `ContainerInterface`-compatible параметр;
 - invocation mode factory (`requiresContainer`) вычисляется один раз при регистрации, а не в runtime hot path.
 
 ### Шаг 6. Boot phase
@@ -263,7 +265,8 @@
 
 - registry single-assignment;
 - чтение registry до инициализации считается lifecycle error;
-- bootstrap intentionally fail-fast, если app seams (`routes/web.php`, `commands/console.php`) невалидны.
+- bootstrap intentionally fail-fast, если app seams (`routes/web.php`, `commands/console.php`) невалидны;
+- routes/commands files должны оставаться relative project paths и не могут escape-нуться за пределы `basePath`.
 
 ---
 
@@ -281,7 +284,7 @@
 
 ### Шаг 2. Global middleware pipeline
 
-`Application::handle()` строит global pipeline.
+`Application` собирает top-level global pipeline один раз в constructor, а `Application::handle()` только запускает его на конкретном request.
 
 Инвариант:
 
@@ -297,6 +300,9 @@
 
 - path нормализуется один раз на boundary `Router`;
 - static routes приоритетнее dynamic routes;
+- route template компилируется один раз внутри `Route` и переиспользуется и для matching, и для URL generation;
+- segment parameters могут иметь локальные constraints вида `{id:\d+}`;
+- constraint mismatch считается `404`, а не `405`;
 - `HEAD` умеет fallback к `GET`, если отдельный `HEAD` маршрут не определён;
 - `405 Allow` включает `HEAD`, если path поддерживает `GET`.
 
@@ -338,8 +344,10 @@ Fallback handler этого pipeline — `RouteHandler`.
 
 `ResponseEmitter`:
 
-- выставляет status code;
+- очищает active cleanable output buffer перед emission status/headers;
+- отправляет explicit HTTP status line из protocol version, status code и reason phrase response;
 - отправляет headers;
+- при `emitBody=false` и known body size синтезирует `Content-Length`, если он ещё не задан;
 - при необходимости пропускает body emission;
 - читает body stream chunked.
 
@@ -365,7 +373,7 @@ Fallback handler этого pipeline — `RouteHandler`.
 Во время boot `ConsoleCommandsProvider`:
 
 - читает `console.commands` из config;
-- загружает `commands/console.php` через scope-isolated `require`;
+- загружает `commands/console.php` через scope-isolated `require` с project-bound path validation;
 - валидирует, что registrar callable;
 - инициализирует `CommandRegistry`.
 
@@ -454,6 +462,8 @@ CLI path не делает дополнительной магии поверх 
 
 - routing boundary владеет нормализацией path;
 - match возвращает typed result, а не `null`;
+- route template один и тот же для matching и generation;
+- URL generation fail-fast: missing, unexpected и constraint-violating parameters считаются `UrlGenerationException`;
 - route names уникальны;
 - route groups живут только на registration layer.
 
@@ -532,11 +542,11 @@ CLI path не делает дополнительной магии поверх 
 
 ### Неправильный routes file
 
-Если `routes/web.php` не существует или не возвращает callable registrar, HTTP runtime не соберётся.
+Если `routes/web.php` не существует, escape-нул за пределы project base path или не возвращает callable registrar, HTTP runtime не соберётся.
 
 ### Неправильный commands file
 
-Если `commands/console.php` не существует или не возвращает callable registrar, CLI runtime не соберётся.
+Если `commands/console.php` не существует, escape-нул за пределы project base path или не возвращает callable registrar, CLI runtime не соберётся.
 
 ### Нарушение bootstrap lifecycle
 
@@ -628,7 +638,7 @@ CLI path не делает дополнительной магии поверх 
 
 - `composer qa` — green
 - `composer test` — green
-- `98 tests / 290 assertions`
+- `122 tests / 342 assertions`
 
 ---
 

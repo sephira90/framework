@@ -16,6 +16,7 @@ final class ConfiguredServicesRegistrar
     public function register(ContainerBuilder $builder, Config $config): void
     {
         $containerConfig = $this->assertContainerConfig($config->get('container', []));
+        /** @var array{bindings?: mixed, singletons?: mixed, aliases?: mixed} $containerConfig */
         $bindings = $this->assertDefinitionMap('bindings', $containerConfig['bindings'] ?? []);
         $singletons = $this->assertDefinitionMap('singletons', $containerConfig['singletons'] ?? []);
         $aliases = $this->assertAliasMap($containerConfig['aliases'] ?? []);

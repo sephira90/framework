@@ -7,7 +7,6 @@ use Framework\Foundation\HttpRuntime;
 $runtime = (static function (): HttpRuntime {
     $runtime = require dirname(__DIR__) . '/bootstrap/app.php';
 
-    /** @psalm-suppress RedundantCondition */
     if (!$runtime instanceof HttpRuntime) {
         throw new RuntimeException('Bootstrap must return an HttpRuntime instance.');
     }
