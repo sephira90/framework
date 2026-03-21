@@ -36,12 +36,12 @@ final class ArgvInputFactory
                 $option = substr($token, 2);
 
                 if ($option !== '' && str_contains($option, '=')) {
+                    /** @var array{0: string, 1: string} $parts */
                     $parts = explode('=', $option, 2);
                     $name = $parts[0];
-                    $value = $parts[1] ?? null;
 
-                    if ($name !== '' && is_string($value)) {
-                        $options[$name] = $value;
+                    if ($name !== '') {
+                        $options[$name] = $parts[1];
                         continue;
                     }
                 }
