@@ -60,6 +60,106 @@ PHP);
         self::assertSame('testing', $config->get('app.env'));
     }
 
+    public function testConfigLoaderMergesConfigurationDirectoryFiles(): void
+    {
+        $basePath = $this->createTempDirectory();
+
+        $this->writeFile($basePath, 'config/app.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+return [
+    'app' => [
+        'name' => 'Framework',
+        'env' => 'testing',
+        'debug' => false,
+    ],
+];
+PHP);
+        $this->writeFile($basePath, 'config/container.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+return [
+    'container' => [
+        'bindings' => [],
+        'singletons' => [
+            'service_one' => 'value',
+        ],
+        'aliases' => [],
+    ],
+];
+PHP);
+        $this->writeFile($basePath, 'config/http.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+return [
+    'routes' => 'routes/web.php',
+    'middleware' => [],
+];
+PHP);
+
+        $config = ConfigLoader::load($basePath . DIRECTORY_SEPARATOR . 'config');
+
+        self::assertSame('Framework', $config->get('app.name'));
+        self::assertSame('testing', $config->get('app.env'));
+        self::assertSame('routes/web.php', $config->get('routes'));
+        self::assertSame('value', $config->get('container.singletons.service_one'));
+    }
+
+    public function testConfigLoaderAppliesEnvironmentOverlayAfterBaseMerge(): void
+    {
+        $basePath = $this->createTempDirectory();
+
+        $this->writeFile($basePath, 'config/app.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+return [
+    'app' => [
+        'name' => 'Framework',
+        'env' => 'production',
+        'debug' => false,
+    ],
+];
+PHP);
+        $this->writeFile($basePath, 'config/http.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+return [
+    'middleware' => [
+        'base-middleware',
+    ],
+];
+PHP);
+        $this->writeFile($basePath, 'config/environments/production.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+return [
+    'app' => [
+        'debug' => true,
+    ],
+    'middleware' => [
+        'production-middleware',
+    ],
+];
+PHP);
+
+        $config = ConfigLoader::load($basePath . DIRECTORY_SEPARATOR . 'config');
+
+        self::assertTrue($config->get('app.debug'));
+        self::assertSame(['production-middleware'], $config->get('middleware'));
+    }
+
     public function testEnvironmentLoaderPopulatesEnvBeforeConfigurationIsRead(): void
     {
         $basePath = $this->createTempDirectory();

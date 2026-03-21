@@ -33,7 +33,7 @@ final class ApplicationFactory
     {
         (new EnvironmentLoader())->load($basePath);
 
-        $config = ConfigLoader::load($basePath . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR . 'app.php');
+        $config = ConfigLoader::load($basePath . DIRECTORY_SEPARATOR . 'config');
         $container = self::bootstrapper()->bootstrap($basePath, $config);
 
         return ContainerAccessor::get($container, HttpRuntime::class);
