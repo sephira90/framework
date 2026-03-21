@@ -37,6 +37,8 @@ final readonly class ErrorResponseFactory
      */
     public function methodNotAllowed(array $allowedMethods): ResponseInterface
     {
+        $allowedMethods = AllowedMethods::normalize($allowedMethods);
+
         return $this->textResponse(405, 'Method Not Allowed', [
             'Allow' => implode(', ', $allowedMethods),
         ]);

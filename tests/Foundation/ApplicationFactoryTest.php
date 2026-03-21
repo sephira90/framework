@@ -90,6 +90,7 @@ PHP,
         );
 
         self::assertSame('global-one>global-two>route>handler', $this->handle($runtime, 'GET', '/stack'));
+        self::assertSame('global-one>global-two>route>handler', $this->handle($runtime, 'GET', '/stack'));
     }
 
     public function testApplicationSupportsRouteGroupsWithInheritedMiddleware(): void

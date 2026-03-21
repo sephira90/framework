@@ -25,12 +25,12 @@ final class ErrorResponseFactoryTest extends FrameworkTestCase
         self::assertSame('Not Found', (string) $response->getBody());
     }
 
-    public function testMethodNotAllowedProducesAllowHeader(): void
+    public function testMethodNotAllowedProducesNormalizedAllowHeader(): void
     {
-        $response = $this->factory(debug: false)->methodNotAllowed(['POST', 'GET']);
+        $response = $this->factory(debug: false)->methodNotAllowed(['post', 'get']);
 
         self::assertSame(405, $response->getStatusCode());
-        self::assertSame(['POST, GET'], $response->getHeader('Allow'));
+        self::assertSame(['GET, HEAD, POST'], $response->getHeader('Allow'));
         self::assertSame('Method Not Allowed', (string) $response->getBody());
     }
 

@@ -21,14 +21,17 @@ use Psr\Http\Server\RequestHandlerInterface;
  */
 final readonly class Application implements RequestHandlerInterface
 {
+    private MiddlewareDispatcher $dispatcher;
+
     /**
      * @param list<class-string<MiddlewareInterface>|MiddlewareInterface> $globalMiddleware
      */
     public function __construct(
-        private RequestHandlerInterface $routeDispatcher,
-        private MiddlewareResolver $middlewareResolver,
-        private array $globalMiddleware,
+        RequestHandlerInterface $routeDispatcher,
+        MiddlewareResolver $middlewareResolver,
+        array $globalMiddleware,
     ) {
+        $this->dispatcher = new MiddlewareDispatcher($globalMiddleware, $middlewareResolver, $routeDispatcher);
     }
 
     /**
@@ -38,12 +41,6 @@ final readonly class Application implements RequestHandlerInterface
     #[Override]
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        $dispatcher = new MiddlewareDispatcher(
-            $this->globalMiddleware,
-            $this->middlewareResolver,
-            $this->routeDispatcher
-        );
-
-        return $dispatcher->handle($request);
+        return $this->dispatcher->handle($request);
     }
 }

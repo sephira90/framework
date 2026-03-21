@@ -11,6 +11,13 @@ use Psr\Http\Message\ResponseInterface;
  */
 final class ResponseEmitter
 {
+    private readonly ResponseEmitterSapiInterface $sapi;
+
+    public function __construct(?ResponseEmitterSapiInterface $sapi = null)
+    {
+        $this->sapi = $sapi ?? new NativeResponseEmitterSapi();
+    }
+
     /**
      * Эмитит status, headers и body.
      *
@@ -23,19 +30,38 @@ final class ResponseEmitter
      */
     public function emit(ResponseInterface $response, bool $emitBody = true): void
     {
-        if (headers_sent()) {
+        if ($this->sapi->headersSent()) {
             return;
         }
 
-        http_response_code($response->getStatusCode());
+        $this->sapi->clearActiveOutputBufferIfPossible();
 
-        foreach ($response->getHeaders() as $name => $values) {
-            foreach ($values as $value) {
-                header(sprintf('%s: %s', $name, $value), false);
-            }
+        if ($this->sapi->headersSent()) {
+            return;
         }
 
         $body = $response->getBody();
+        $headers = $response->getHeaders();
+
+        if (
+            !$emitBody
+            && !$response->hasHeader('Content-Length')
+            && ($bodySize = $body->getSize()) !== null
+        ) {
+            $headers['Content-Length'] = [(string) $bodySize];
+        }
+
+        $this->sapi->sendStatusLine(
+            $response->getProtocolVersion(),
+            $response->getStatusCode(),
+            $response->getReasonPhrase()
+        );
+
+        foreach ($headers as $name => $values) {
+            foreach ($values as $value) {
+                $this->sapi->sendHeader((string) $name, $value);
+            }
+        }
 
         if (!$emitBody) {
             return;
