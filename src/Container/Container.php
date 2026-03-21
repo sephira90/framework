@@ -72,14 +72,14 @@ final class Container implements ContainerInterface
         $this->resolving[] = $resolvedId;
 
         try {
-            if ($definition->shared) {
+            if ($definition->isShared()) {
                 return $this->instances[$resolvedId] = $this->invokeFactory(
-                    $definition->factory,
-                    $definition->requiresContainer
+                    $definition->factory(),
+                    $definition->requiresContainer()
                 );
             }
 
-            return $this->invokeFactory($definition->factory, $definition->requiresContainer);
+            return $this->invokeFactory($definition->factory(), $definition->requiresContainer());
         } catch (NotFoundException | ContainerException $exception) {
             throw $exception;
         } catch (Throwable $exception) {

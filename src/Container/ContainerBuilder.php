@@ -134,7 +134,6 @@ final class ContainerBuilder
     private static function instantiateClass(string $id, string $class): object
     {
         $reflection = new ReflectionClass($class);
-
         $constructor = $reflection->getConstructor();
 
         if ($constructor !== null && $constructor->getNumberOfRequiredParameters() > 0) {

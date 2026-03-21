@@ -16,9 +16,33 @@ use Closure;
 final readonly class ServiceDefinition
 {
     public function __construct(
-        public Closure $factory,
-        public bool $shared,
-        public bool $requiresContainer,
+        private Closure $factory,
+        private bool $shared,
+        private bool $requiresContainer,
     ) {
+    }
+
+    /**
+     * Возвращает factory, уже провалидированный builder'ом.
+     */
+    public function factory(): Closure
+    {
+        return $this->factory;
+    }
+
+    /**
+     * Сообщает, должен ли resolved instance кэшироваться контейнером.
+     */
+    public function isShared(): bool
+    {
+        return $this->shared;
+    }
+
+    /**
+     * Возвращает предвычисленный invocation mode factory.
+     */
+    public function requiresContainer(): bool
+    {
+        return $this->requiresContainer;
     }
 }
