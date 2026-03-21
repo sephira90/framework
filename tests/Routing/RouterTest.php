@@ -33,6 +33,24 @@ final class RouterTest extends FrameworkTestCase
         self::assertSame(['id' => '42'], $dynamicMatch->parameters());
     }
 
+    public function testRouterNormalizesIncomingPathsBeforeMatchingRoutes(): void
+    {
+        $collector = new RouteCollector(new RouteCollection());
+        $collector->get('/health', 'health-handler');
+        $collector->get('/users/{id}', 'user-handler');
+
+        $router = new Router($collector->collection());
+        $staticMatch = $router->match('GET', ' //health// ');
+        $dynamicMatch = $router->match('GET', ' ///users//42/ ');
+
+        self::assertSame(RouteMatchStatus::Found, $staticMatch->status());
+        self::assertSame('/health', $staticMatch->route()->path());
+
+        self::assertSame(RouteMatchStatus::Found, $dynamicMatch->status());
+        self::assertSame('/users/{id}', $dynamicMatch->route()->path());
+        self::assertSame(['id' => '42'], $dynamicMatch->parameters());
+    }
+
     public function testRouterReturnsMethodNotAllowedAndNotFound(): void
     {
         $collector = new RouteCollector(new RouteCollection());
@@ -65,6 +83,57 @@ final class RouterTest extends FrameworkTestCase
         self::assertSame(RouteMatchStatus::Found, $dynamicMatch->status());
         self::assertSame('/users/{id}', $dynamicMatch->route()->path());
         self::assertSame(['id' => '42'], $dynamicMatch->parameters());
+    }
+
+    public function testRouterIncludesHeadInAllowedMethodsWhenGetIsSupported(): void
+    {
+        $collector = new RouteCollector(new RouteCollection());
+        $collector->get('/status', 'status-handler');
+
+        $router = new Router($collector->collection());
+        $match = $router->match('DELETE', '/status');
+
+        self::assertSame(RouteMatchStatus::MethodNotAllowed, $match->status());
+        self::assertSame(['GET', 'HEAD'], $match->allowedMethods());
+    }
+
+    public function testRouterGeneratesUrlsFromNamedRoutes(): void
+    {
+        $collector = new RouteCollector(new RouteCollection());
+        $collector->get('/status', 'status-handler')->name('status.show');
+        $collector->get('/users/{id}/posts/{slug}', 'post-handler')->name('users.posts.show');
+
+        $router = new Router($collector->collection());
+
+        self::assertSame('/status', $router->url('status.show'));
+        self::assertSame('/users/42/posts/hello%20world', $router->url('users.posts.show', [
+            'id' => 42,
+            'slug' => 'hello world',
+        ]));
+    }
+
+    public function testRouterRejectsUnknownOrDuplicateNamedRoutes(): void
+    {
+        $collector = new RouteCollector(new RouteCollection());
+        $collector->get('/status', 'status-handler')->name('status.show');
+
+        $router = new Router($collector->collection());
+
+        try {
+            $router->url('missing.route');
+            self::fail('Expected an exception for an unknown route name.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertStringContainsString('is not registered', $exception->getMessage());
+        }
+
+        $duplicateCollector = new RouteCollector(new RouteCollection());
+        $duplicateCollector->get('/first', 'first-handler')->name('duplicate.name');
+        $duplicateCollector->get('/second', 'second-handler')->name('duplicate.name');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('already registered');
+
+        new Router($duplicateCollector->collection());
     }
 
     public function testRouterPrefersExplicitHeadRouteOverGetFallback(): void

@@ -44,6 +44,10 @@ final readonly class RouteMatch
      */
     public static function methodNotAllowed(array $allowedMethods): self
     {
+        if (in_array('GET', $allowedMethods, true) && !in_array('HEAD', $allowedMethods, true)) {
+            $allowedMethods[] = 'HEAD';
+        }
+
         sort($allowedMethods);
 
         return new self(RouteMatchStatus::MethodNotAllowed, null, [], array_values(array_unique($allowedMethods)));

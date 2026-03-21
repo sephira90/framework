@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Framework\Routing;
 
+use InvalidArgumentException;
+
 /**
  * Выполняет method + path matching поверх зарегистрированной коллекции route'ов.
  *
@@ -21,12 +23,17 @@ final class Router
     /** @var list<Route> */
     private array $dynamicRoutes = [];
 
+    /** @var array<string, Route> */
+    private array $namedRoutes = [];
+
     /**
      * Предкомпилирует коллекцию маршрутов в две структуры: static и dynamic.
      */
     public function __construct(RouteCollection $routes)
     {
         foreach ($routes->all() as $route) {
+            $this->indexNamedRoute($route);
+
             if ($route->isStatic()) {
                 foreach ($route->methods() as $method) {
                     $this->staticRoutes[$route->path()][$method] = $route;
@@ -63,16 +70,16 @@ final class Router
         $allowedMethods = [];
 
         foreach ($this->dynamicRoutes as $route) {
-            if (!$route->matchesPath($normalizedPath)) {
+            if (!$route->matchesNormalizedPath($normalizedPath)) {
                 continue;
             }
 
             if (in_array($normalizedMethod, $route->methods(), true)) {
-                return RouteMatch::found($route, $route->extractParameters($normalizedPath));
+                return RouteMatch::found($route, $route->extractParametersFromNormalizedPath($normalizedPath));
             }
 
             if ($normalizedMethod === 'HEAD' && in_array('GET', $route->methods(), true)) {
-                return RouteMatch::found($route, $route->extractParameters($normalizedPath));
+                return RouteMatch::found($route, $route->extractParametersFromNormalizedPath($normalizedPath));
             }
 
             $allowedMethods = [...$allowedMethods, ...$route->methods()];
@@ -83,5 +90,36 @@ final class Router
         }
 
         return RouteMatch::notFound();
+    }
+
+    /**
+     * Генерирует path по имени маршрута и набору route parameters.
+     *
+     * @param array<string, string|int|float> $parameters
+     */
+    public function url(string $name, array $parameters = []): string
+    {
+        $route = $this->namedRoutes[$name] ?? null;
+
+        if ($route === null) {
+            throw new InvalidArgumentException(sprintf('Route name [%s] is not registered.', $name));
+        }
+
+        return $route->generatePath($parameters);
+    }
+
+    private function indexNamedRoute(Route $route): void
+    {
+        $name = $route->name();
+
+        if ($name === null) {
+            return;
+        }
+
+        if (isset($this->namedRoutes[$name])) {
+            throw new InvalidArgumentException(sprintf('Route name [%s] is already registered.', $name));
+        }
+
+        $this->namedRoutes[$name] = $route;
     }
 }

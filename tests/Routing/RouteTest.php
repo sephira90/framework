@@ -31,9 +31,9 @@ final class RouteTest extends FrameworkTestCase
         self::assertSame(['GET'], $route->methods());
         self::assertSame('/health', $route->path());
         self::assertTrue($route->isStatic());
-        self::assertTrue($route->matchesPath('/health/'));
-        self::assertFalse($route->matchesPath('/health/check'));
-        self::assertSame([], $route->extractParameters('/health'));
+        self::assertTrue($route->matchesNormalizedPath('/health'));
+        self::assertFalse($route->matchesNormalizedPath('/health/check'));
+        self::assertSame([], $route->extractParametersFromNormalizedPath('/health'));
     }
 
     public function testDynamicRouteMatchesAndExtractsDecodedParameters(): void
@@ -45,12 +45,48 @@ final class RouteTest extends FrameworkTestCase
         );
 
         self::assertFalse($route->isStatic());
-        self::assertTrue($route->matchesPath('/users/42/posts/hello%20world'));
-        self::assertFalse($route->matchesPath('/users/42'));
+        self::assertTrue($route->matchesNormalizedPath('/users/42/posts/hello%20world'));
+        self::assertFalse($route->matchesNormalizedPath('/users/42'));
         self::assertSame(
             ['id' => '42', 'slug' => 'hello world'],
-            $route->extractParameters('/users/42/posts/hello%20world')
+            $route->extractParametersFromNormalizedPath('/users/42/posts/hello%20world')
         );
+    }
+
+    public function testRouteCanBeNamedAndGeneratePathFromParameters(): void
+    {
+        $route = (new Route(
+            ['GET'],
+            '/users/{id}/posts/{slug}',
+            static fn (): Response => new Response(200, [], 'ok')
+        ))->withName('users.posts.show');
+
+        self::assertSame('users.posts.show', $route->name());
+        self::assertSame('/users/42/posts/hello%20world', $route->generatePath([
+            'id' => 42,
+            'slug' => 'hello world',
+        ]));
+    }
+
+    public function testRouteRejectsEmptyNamesAndMissingUrlParameters(): void
+    {
+        $route = new Route(
+            ['GET'],
+            '/users/{id}',
+            static fn (): Response => new Response(200, [], 'ok')
+        );
+
+        try {
+            $route->withName(' ');
+            self::fail('Expected an exception for an empty route name.');
+        } catch (InvalidArgumentException $exception) {
+            self::assertStringContainsString('Route name must not be empty', $exception->getMessage());
+        }
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('requires parameter [id]');
+
+        $route->generatePath();
     }
 
     public function testRouteRejectsDuplicateParameterNames(): void

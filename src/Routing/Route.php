@@ -15,12 +15,17 @@ use Psr\Http\Server\MiddlewareInterface;
  *
  * - допустимые HTTP methods;
  * - нормализованный path;
+ * - optional route name для URL generation;
  * - handler definition;
  * - route-level middleware;
  * - предвычисленную форму для matching и parameter extraction.
  *
  * Для v0 это один концепт и одна единица сопровождения: данные маршрута и его
  * matching invariants расположены рядом.
+ *
+ * Нормализация внешнего path выполняется на boundary routing layer. После этого
+ * Route ожидает уже канонический path и не повторяет ту же работу внутри
+ * matching helpers.
  */
 final readonly class Route
 {
@@ -38,6 +43,7 @@ final readonly class Route
         string $path,
         callable|string $handler,
         private array $middleware = [],
+        ?string $name = null,
     ) {
         $normalizedMethods = array_values(array_unique(array_map(
             static fn (string $method): string => strtoupper($method),
@@ -51,10 +57,13 @@ final readonly class Route
         $this->methods = $normalizedMethods;
         $this->path = self::normalizePath($path);
         $this->handler = is_string($handler) ? $handler : Closure::fromCallable($handler);
+        $this->name = $name !== null ? self::normalizeName($name) : null;
         [$this->regex, $this->parameterNames, $this->static] = self::compilePath($this->path);
     }
 
     private Closure|string $handler;
+
+    private ?string $name;
 
     /** @var non-empty-string */
     private string $regex;
@@ -104,6 +113,11 @@ final readonly class Route
         return $this->handler;
     }
 
+    public function name(): ?string
+    {
+        return $this->name;
+    }
+
     /**
      * @return list<class-string<MiddlewareInterface>|MiddlewareInterface>
      */
@@ -118,35 +132,43 @@ final readonly class Route
     }
 
     /**
-     * Проверяет, подходит ли path под этот маршрут.
+     * Возвращает новый route instance с именем для URL generation.
      */
-    public function matchesPath(string $path): bool
+    public function withName(string $name): self
     {
-        $normalizedPath = self::normalizePath($path);
-
-        if ($this->static) {
-            return $this->path === $normalizedPath;
-        }
-
-        return (bool) preg_match($this->regex, $normalizedPath);
+        return new self($this->methods, $this->path, $this->handler, $this->middleware, $name);
     }
 
     /**
-     * Извлекает route parameters из сматченного path.
+     * Проверяет, подходит ли уже нормализованный path под этот маршрут.
+     *
+     * Router владеет нормализацией пользовательского ввода и передаёт сюда
+     * канонический path. Это удерживает правило "normalize once at the boundary"
+     * вместо повторной defensive normalization в каждом helper method.
+     */
+    public function matchesNormalizedPath(string $path): bool
+    {
+        if ($this->static) {
+            return $this->path === $path;
+        }
+
+        return (bool) preg_match($this->regex, $path);
+    }
+
+    /**
+     * Извлекает route parameters из уже нормализованного и сматченного path.
      *
      * @return array<string, string>
      */
-    public function extractParameters(string $path): array
+    public function extractParametersFromNormalizedPath(string $path): array
     {
-        $normalizedPath = self::normalizePath($path);
-
         if ($this->static) {
             return [];
         }
 
         $matches = [];
 
-        if (!preg_match($this->regex, $normalizedPath, $matches)) {
+        if (!preg_match($this->regex, $path, $matches)) {
             return [];
         }
 
@@ -157,6 +179,38 @@ final readonly class Route
         }
 
         return $parameters;
+    }
+
+    /**
+     * Генерирует path этого маршрута из route parameters.
+     *
+     * @param array<string, string|int|float> $parameters
+     */
+    public function generatePath(array $parameters = []): string
+    {
+        if ($this->parameterNames === []) {
+            return $this->path;
+        }
+
+        $path = $this->path;
+
+        foreach ($this->parameterNames as $parameterName) {
+            if (!array_key_exists($parameterName, $parameters)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Route [%s] requires parameter [%s] for URL generation.',
+                    $this->path,
+                    $parameterName
+                ));
+            }
+
+            $path = str_replace(
+                '{' . $parameterName . '}',
+                rawurlencode((string) $parameters[$parameterName]),
+                $path
+            );
+        }
+
+        return $path;
     }
 
     /**
@@ -194,5 +248,16 @@ final readonly class Route
         }
 
         return ['#^/' . implode('/', $patternSegments) . '$#', $parameterNames, false];
+    }
+
+    private static function normalizeName(string $name): string
+    {
+        $normalizedName = trim($name);
+
+        if ($normalizedName === '') {
+            throw new InvalidArgumentException('Route name must not be empty.');
+        }
+
+        return $normalizedName;
     }
 }

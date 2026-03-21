@@ -45,7 +45,7 @@ final class RouteDispatcherTest extends FrameworkTestCase
         )->handle($this->request('POST', '/hello'));
 
         self::assertSame(405, $response->getStatusCode());
-        self::assertSame(['GET'], $response->getHeader('Allow'));
+        self::assertSame(['GET, HEAD'], $response->getHeader('Allow'));
         self::assertSame('Method Not Allowed', (string) $response->getBody());
     }
 
