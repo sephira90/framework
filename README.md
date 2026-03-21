@@ -15,13 +15,34 @@
 
 Текущий `v0` покрывает минимальный HTTP lifecycle:
 
-1. загрузка `.env` и `config/app.php`;
+1. загрузка `.env`, сборка `config/` и optional environment overlay;
 2. сборка container;
 3. загрузка маршрутов;
 4. создание middleware pipeline;
 5. dispatch запроса в route handler;
 6. преобразование ошибок в HTTP response;
 7. emission ответа в SAPI.
+
+Configuration model теперь тоже вышла за пределы single-file `v0`:
+
+- базовые config slices детерминированно мерджатся из `config/*.php`;
+- optional overlay из `config/environments/<app.env>.php` применяется после базовой сборки;
+- текущий skeleton уже разрезан на `config/app.php`, `config/http.php` и `config/container.php`.
+
+Поверх этого уже добавлена первая post-`v0` routing capability:
+
+- named routes через fluent `RouteBuilder`;
+- URL generation через `Router::url(name, parameters)`.
+
+Следующий слой routing model тоже уже поддерживается:
+
+- route groups с prefix inheritance;
+- route groups с inherited middleware.
+
+Error model тоже расширен за пределы голого `500`:
+
+- controlled `HttpException` hierarchy для осознанных `4xx/405`;
+- единый error boundary различает клиентские HTTP-ошибки и неожиданные `Throwable`.
 
 ## Что сознательно не входит в v0
 
@@ -31,7 +52,6 @@
 - event system;
 - queues и scheduler;
 - session/auth/csrf;
-- named routes и URL generation;
 - autowiring by default;
 - provider-heavy extensibility model.
 
@@ -41,12 +61,12 @@
 
 - `src/Config/` — конфигурация и загрузка окружения
 - `src/Container/` — минимальный explicit DI container
-- `src/Routing/` — маршруты, матчинг и результаты матчинга
-- `src/Http/` — HTTP runtime helpers, resolvers, dispatchers, emitter, error responses
+- `src/Routing/` — маршруты, route groups, named routes, URL generation, матчинг и результаты матчинга
+- `src/Http/` — HTTP runtime helpers, resolvers, dispatchers, emitter, error responses и controlled HTTP exceptions
 - `src/Foundation/` — верхнеуровневая сборка runtime
 - `app/` — прикладные handler'ы и пользовательский код
 - `bootstrap/` — bootstrap runtime
-- `config/` — конфигурация приложения
+- `config/` — многофайловая конфигурация приложения и environment overlays
 - `routes/` — регистрация маршрутов
 - `public/` — front controller
 - `tests/` — калибровка и regression safety net

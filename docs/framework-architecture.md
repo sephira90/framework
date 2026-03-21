@@ -62,7 +62,7 @@
 Отвечает за конфигурацию и окружение.
 
 - `Config` — immutable repository поверх массива конфигурации;
-- `ConfigLoader` — загружает PHP config file в изолированном scope;
+- `ConfigLoader` — загружает либо один PHP config file, либо `config/` directory в изолированном scope и применяет deterministic merge strategy;
 - `Env` — читает переменные окружения;
 - `EnvironmentLoader` — поднимает `.env` до сборки runtime без process-level кеша путей;
 - `InvalidConfigurationException` — сигнализирует о плохой конфигурации.
@@ -82,8 +82,9 @@
 
 - `Route` — маршрут с методами, path, handler и middleware;
 - `RouteCollection` — список маршрутов;
-- `RouteCollector` — API регистрации маршрутов;
-- `Router` — матчинг method + path;
+- `RouteCollector` — API регистрации маршрутов, route groups и inherited route metadata;
+- `RouteBuilder` — fluent post-registration API для route metadata;
+- `Router` — матчинг method + path и URL generation по имени маршрута;
 - `RouteMatch` / `RouteMatchStatus` — результат матчинга;
 - `RouteAttributes` — имена request-атрибутов, куда кладётся matched route и params.
 
@@ -100,7 +101,7 @@
 - `ResponseEmitter` — отправляет PSR-7 response в SAPI;
 - `ErrorResponseFactory` — строит стандартные error responses;
 - `Http\Middleware\ErrorHandlingMiddleware` — верхний error boundary;
-- `Http\Exception\*` — ошибки плохих handler/middleware definitions.
+- `Http\Exception\*` — ошибки плохих handler/middleware definitions и controlled HTTP exceptions.
 
 ### `src/Foundation`
 
@@ -124,7 +125,7 @@
 ### Прикладной слой
 
 - `app/` — пользовательские handlers;
-- `config/` — app configuration;
+- `config/` — app configuration slices и optional environment overlays;
 - `routes/` — route registration;
 - `bootstrap/` — runtime bootstrap;
 - `public/` — front controller.
@@ -142,7 +143,7 @@
 - создаёт runtime через bootstrap;
 - получает request из globals;
 - передаёт request в application;
-- отдаёт response emitter'у.
+- отдаёт response emitter'у с transport-level policy для `HEAD`.
 
 Это самый внешний слой. Здесь нет routing logic, container logic или бизнес-логики.
 
@@ -158,10 +159,10 @@
 
 Смысл:
 
-- `.env` должен быть подгружен до чтения `config/app.php`;
+- `.env` должен быть подгружен до чтения `config/`;
 - конфигурация может использовать `Env::get()` и `Env::bool()`;
 - один и тот же `basePath` можно повторно загрузить в том же процессе, если окружение между bootstrap-циклами было очищено;
-- после этого `ConfigLoader` строит `Config`.
+- после этого `ConfigLoader` детерминированно мерджит top-level `config/*.php` и затем может применить `config/environments/<app.env>.php`.
 
 Инвариант:
 
@@ -181,7 +182,7 @@
 - порядок providers hardcoded;
 - providers internal-only;
 - приложение не конфигурирует provider list;
-- `config/app.php` и `routes/web.php` остаются primary app model.
+- `config/` и `routes/web.php` остаются primary app model.
 
 ### Шаг 5. Register phase
 
@@ -235,6 +236,11 @@
 - вызывает `Router::match(method, path)`;
 - получает `RouteMatch`.
 
+`Router` нормализует входной path один раз на boundary routing layer и дальше
+работает уже с канонической формой. `Route` не повторяет ту же нормализацию
+внутри matching helpers: он принимает уже нормализованный path как часть
+внутреннего контракта между слоями.
+
 Возможны три исхода:
 
 1. `Found`
@@ -242,6 +248,8 @@
 3. `MethodNotAllowed`
 
 Если route не найден, `ErrorResponseFactory` строит `404` или `405`.
+Для `405 Method Not Allowed` заголовок `Allow` отражает runtime semantics:
+если путь поддерживает `GET`, в список также включается `HEAD`.
 
 ### Шаг 9. Привязка route к request
 
@@ -280,7 +288,12 @@
 
 ### Шаг 12. Преобразование ошибок в response
 
-Если любой нижележащий слой бросает `Throwable`, `ErrorHandlingMiddleware` перехватывает его и вызывает `ErrorResponseFactory::internalServerError()`.
+Если нижележащий слой бросает `Framework\Http\Exception\HttpException`,
+`ErrorHandlingMiddleware` считает, что клиентская HTTP-семантика уже выбрана явно,
+и вызывает `ErrorResponseFactory::fromHttpException()`.
+
+Если бросается любой другой `Throwable`, middleware считает это неконтролируемой
+ошибкой исполнения и вызывает `ErrorResponseFactory::internalServerError()`.
 
 Поведение зависит от `app.debug`:
 
@@ -293,7 +306,8 @@
 
 - выставляет HTTP status code;
 - отправляет все headers;
-- rewind'ит body stream, если он seekable;
+- умеет не эмитить body, если transport boundary этого требует;
+- rewind'ит body stream, если он seekable и body вообще должен эмититься;
 - читает stream чанками по `8192` байт;
 - выводит body.
 
@@ -307,6 +321,10 @@
 
 - `Config` immutable;
 - dotted access не создаёт значения, только читает;
+- `ConfigLoader` принимает либо один файл, либо config directory;
+- top-level `config/*.php` мерджатся детерминированно в отсортированном порядке;
+- associative arrays мерджатся рекурсивно, list arrays заменяются целиком, а не склеиваются;
+- optional overlay из `config/environments/<app.env>.php` применяется после базовой сборки;
 - конфиг не должен содержать сложную runtime-логику.
 
 ### Container
@@ -345,7 +363,7 @@
 
 В текущем `v0` точки расширения сознательно узкие:
 
-- `config/app.php`
+- `config/*.php`
 - `routes/web.php`
 - container `bindings/singletons/aliases`
 - global middleware
@@ -376,7 +394,7 @@ Autowiring удобнее, но скрывает больше правил.
 Это сделано специально:
 
 - lifecycle нужен framework core, но пока не должен становиться новым app-level API;
-- приложение по-прежнему описывается через `config/app.php` и `routes/web.php`;
+- приложение по-прежнему описывается через `config/` и `routes/web.php`;
 - provider order остаётся закрытым и фиксированным, чтобы не размывать причинную модель bootstrap;
 - это даёт выигрыш по связности `ApplicationFactory`, не превращая `v0` в plugin platform раньше необходимости.
 
@@ -394,7 +412,7 @@ Autowiring удобнее, но скрывает больше правил.
 
 ### Неправильный config
 
-Если `config/app.php` отсутствует или возвращает не массив, будет `InvalidConfigurationException`.
+Если `config/` отсутствует, пуст, не читается или любой config file возвращает не массив, будет `InvalidConfigurationException`.
 
 ### Неправильный routes file
 
