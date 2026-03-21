@@ -45,4 +45,19 @@ final class ResponseEmitterTest extends FrameworkTestCase
 
         self::assertSame($payload, $output);
     }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    public function testEmitterCanSuppressBodyEmission(): void
+    {
+        $factory = new Psr17Factory();
+        $response = $factory->createResponse(200)->withBody($factory->createStream('payload'));
+
+        ob_start();
+        (new ResponseEmitter())->emit($response, emitBody: false);
+        $output = ob_get_clean();
+
+        self::assertSame('', $output);
+        self::assertSame(200, http_response_code());
+    }
 }

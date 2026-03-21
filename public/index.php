@@ -17,8 +17,12 @@ $runtime = (static function (): HttpRuntime {
 
 // Front controller выполняет только три вещи: получает runtime, создаёт
 // request из globals и эмитит response.
-$response = $runtime
-    ->application()
-    ->handle($runtime->requestFactory()->fromGlobals());
+$request = $runtime->requestFactory()->fromGlobals();
+$response = $runtime->application()->handle($request);
 
-$runtime->responseEmitter()->emit($response);
+// `HEAD` делит route semantics с `GET`, но transport boundary не должен
+// отправлять body клиенту даже если response object его содержит.
+$runtime->responseEmitter()->emit(
+    $response,
+    emitBody: strcasecmp($request->getMethod(), 'HEAD') !== 0
+);

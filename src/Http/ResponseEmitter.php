@@ -16,8 +16,12 @@ final class ResponseEmitter
      *
      * Если headers уже отправлены, emitter прекращает работу, чтобы не
      * создавать вторичные ошибки на уровне PHP runtime.
+     *
+     * @param bool $emitBody Управляет transport-level body emission policy.
+     *     Нужен для протокольных случаев вроде `HEAD`, где response object
+     *     может содержать body, но сервер не должен отправлять его клиенту.
      */
-    public function emit(ResponseInterface $response): void
+    public function emit(ResponseInterface $response, bool $emitBody = true): void
     {
         if (headers_sent()) {
             return;
@@ -32,6 +36,10 @@ final class ResponseEmitter
         }
 
         $body = $response->getBody();
+
+        if (!$emitBody) {
+            return;
+        }
 
         if ($body->isSeekable()) {
             $body->rewind();
