@@ -1,0 +1,15 @@
+<?php
+
+declare(strict_types=1);
+
+use Framework\Console\ConsoleOutput;
+use Framework\Foundation\ConsoleRuntime;
+
+/** @var ConsoleRuntime $runtime */
+$runtime = require dirname(__DIR__) . '/bootstrap/console.php';
+
+$input = $runtime->inputFactory()->fromArgv($_SERVER['argv'] ?? []);
+$output = new ConsoleOutput();
+$code = $runtime->application()->run($input, $output);
+
+exit($code);
