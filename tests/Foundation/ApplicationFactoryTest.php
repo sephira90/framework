@@ -16,6 +16,8 @@ use Framework\Tests\Support\Fixtures\ShortCircuitMiddleware;
 use Framework\Tests\Support\Fixtures\StackHandler;
 use Framework\Tests\Support\FrameworkTestCase;
 use Nyholm\Psr7\Factory\Psr17Factory;
+use PHPUnit\Framework\Attributes\PreserveGlobalState;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use Psr\Http\Message\ResponseInterface;
 use stdClass;
 
@@ -90,6 +92,41 @@ PHP,
         self::assertSame('global-one>global-two>route>handler', $this->handle($runtime, 'GET', '/stack'));
     }
 
+    public function testApplicationSupportsRouteGroupsWithInheritedMiddleware(): void
+    {
+        $runtime = $this->createRuntime(
+            <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+use Framework\Routing\RouteCollector;
+
+return static function (RouteCollector $routes): void {
+    $routes->group('/api', static function (RouteCollector $routes): void {
+        $routes->group('/v1', static function (RouteCollector $routes): void {
+            $routes->get('/stack', 'Framework\\Tests\\Support\\Fixtures\\StackHandler', [
+                'Framework\\Tests\\Support\\Fixtures\\RouteMiddleware',
+            ])->name('api.stack');
+        }, [
+            'Framework\\Tests\\Support\\Fixtures\\GlobalTwoMiddleware',
+        ]);
+    }, [
+        'Framework\\Tests\\Support\\Fixtures\\GlobalOneMiddleware',
+    ]);
+};
+PHP,
+            singletons: [
+                GlobalOneMiddleware::class => GlobalOneMiddleware::class,
+                GlobalTwoMiddleware::class => GlobalTwoMiddleware::class,
+                RouteMiddleware::class => RouteMiddleware::class,
+                StackHandler::class => StackHandler::class,
+            ]
+        );
+
+        self::assertSame('global-one>global-two>route>handler', $this->handle($runtime, 'GET', '/api/v1/stack'));
+    }
+
     public function testApplicationSupportsShortCircuitMiddleware(): void
     {
         $runtime = $this->createRuntime(
@@ -144,7 +181,44 @@ PHP,
         self::assertSame('Not Found', (string) $notFound->getBody());
         self::assertSame(405, $methodNotAllowed->getStatusCode());
         self::assertSame('Method Not Allowed', (string) $methodNotAllowed->getBody());
-        self::assertSame(['GET'], $methodNotAllowed->getHeader('Allow'));
+        self::assertSame(['GET, HEAD'], $methodNotAllowed->getHeader('Allow'));
+    }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    public function testApplicationSuppressesBodyEmissionForHeadRequests(): void
+    {
+        $runtime = $this->createRuntime(
+            <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+use Framework\Routing\RouteCollector;
+use Nyholm\Psr7\Response;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+
+return static function (RouteCollector $routes): void {
+    $routes->get('/status', static function (ServerRequestInterface $request): ResponseInterface {
+        return new Response(200, ['Content-Type' => 'text/plain; charset=utf-8'], 'payload');
+    });
+};
+PHP
+        );
+
+        $factory = new Psr17Factory();
+        $request = $factory->createServerRequest('HEAD', '/status');
+        $response = $runtime->application()->handle($request);
+
+        ob_start();
+        $runtime->responseEmitter()->emit($response, emitBody: strcasecmp($request->getMethod(), 'HEAD') !== 0);
+        $output = ob_get_clean();
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('payload', (string) $response->getBody());
+        self::assertSame('', $output);
+        self::assertSame(200, http_response_code());
     }
 
     public function testApplicationHidesExceptionDetailsOutsideDebugMode(): void
@@ -197,6 +271,31 @@ PHP,
 
         self::assertSame(500, $response->getStatusCode());
         self::assertStringContainsString('RuntimeException: boom', (string) $response->getBody());
+    }
+
+    public function testApplicationRendersControlledHttpExceptionsFromHandlers(): void
+    {
+        $runtime = $this->createRuntime(
+            <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+use Framework\Http\Exception\ForbiddenException;
+use Framework\Routing\RouteCollector;
+
+return static function (RouteCollector $routes): void {
+    $routes->get('/forbidden', static function (): never {
+        throw new ForbiddenException('Access denied');
+    });
+};
+PHP
+        );
+
+        $response = $this->response($runtime, 'GET', '/forbidden');
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('Access denied', (string) $response->getBody());
     }
 
     public function testApplicationFactoryFailsWhenRoutesFileIsMissing(): void
