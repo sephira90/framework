@@ -5,27 +5,22 @@ declare(strict_types=1);
 namespace Framework\Routing;
 
 use Closure;
+use Framework\Routing\Exception\UrlGenerationException;
 use InvalidArgumentException;
 use Psr\Http\Server\MiddlewareInterface;
 
 /**
- * Маршрут HTTP-слоя.
+ * HTTP route definition.
  *
- * Route хранит:
+ * Route owns one compiled path contract that is reused for:
  *
- * - допустимые HTTP methods;
- * - нормализованный path;
- * - optional route name для URL generation;
- * - handler definition;
- * - route-level middleware;
- * - предвычисленную форму для matching и parameter extraction.
+ * - normalized path storage;
+ * - incoming path matching;
+ * - parameter extraction;
+ * - URL generation validation.
  *
- * Для v0 это один концепт и одна единица сопровождения: данные маршрута и его
- * matching invariants расположены рядом.
- *
- * Нормализация внешнего path выполняется на boundary routing layer. После этого
- * Route ожидает уже канонический path и не повторяет ту же работу внутри
- * matching helpers.
+ * This keeps matching and generation aligned instead of letting two separate
+ * code paths drift into different parameter rules over time.
  */
 final readonly class Route
 {
@@ -33,6 +28,14 @@ final readonly class Route
     private array $methods;
 
     private string $path;
+
+    private CompiledRoutePath $compiledPath;
+
+    private Closure|string $handler;
+
+    private ?string $name;
+
+    private bool $static;
 
     /**
      * @param list<string> $methods
@@ -56,26 +59,14 @@ final readonly class Route
 
         $this->methods = $normalizedMethods;
         $this->path = self::normalizePath($path);
+        $this->compiledPath = CompiledRoutePath::fromNormalizedPath($this->path);
         $this->handler = is_string($handler) ? $handler : Closure::fromCallable($handler);
         $this->name = $name !== null ? self::normalizeName($name) : null;
-        [$this->regex, $this->parameterNames, $this->static] = self::compilePath($this->path);
+        $this->static = $this->compiledPath->isStatic();
     }
 
-    private Closure|string $handler;
-
-    private ?string $name;
-
-    /** @var non-empty-string */
-    private string $regex;
-
-    /** @var list<string> */
-    private array $parameterNames;
-
-    private bool $static;
-
     /**
-     * Приводит path к единому каноническому виду, чтобы routing не зависел от
-     * лишних слэшей и случайной формы ввода.
+     * Brings the input path to one canonical representation.
      */
     public static function normalizePath(string $path): string
     {
@@ -132,7 +123,7 @@ final readonly class Route
     }
 
     /**
-     * Возвращает новый route instance с именем для URL generation.
+     * Returns a new route instance with a name used for URL generation.
      */
     public function withName(string $name): self
     {
@@ -140,114 +131,33 @@ final readonly class Route
     }
 
     /**
-     * Проверяет, подходит ли уже нормализованный path под этот маршрут.
-     *
-     * Router владеет нормализацией пользовательского ввода и передаёт сюда
-     * канонический path. Это удерживает правило "normalize once at the boundary"
-     * вместо повторной defensive normalization в каждом helper method.
+     * Checks whether an already-normalized path matches this route.
      */
     public function matchesNormalizedPath(string $path): bool
     {
-        if ($this->static) {
-            return $this->path === $path;
-        }
-
-        return (bool) preg_match($this->regex, $path);
+        return $this->compiledPath->matchesNormalizedPath($path);
     }
 
     /**
-     * Извлекает route parameters из уже нормализованного и сматченного path.
+     * Extracts route parameters from an already-normalized and matched path.
      *
      * @return array<string, string>
      */
     public function extractParametersFromNormalizedPath(string $path): array
     {
-        if ($this->static) {
-            return [];
-        }
-
-        $matches = [];
-
-        if (!preg_match($this->regex, $path, $matches)) {
-            return [];
-        }
-
-        $parameters = [];
-
-        foreach ($this->parameterNames as $parameterName) {
-            $parameters[$parameterName] = rawurldecode($matches[$parameterName] ?? '');
-        }
-
-        return $parameters;
+        return $this->compiledPath->extractParametersFromNormalizedPath($path);
     }
 
     /**
-     * Генерирует path этого маршрута из route parameters.
+     * Generates this route's path from route parameters.
      *
      * @param array<string, string|int|float> $parameters
+     *
+     * @throws UrlGenerationException
      */
     public function generatePath(array $parameters = []): string
     {
-        if ($this->parameterNames === []) {
-            return $this->path;
-        }
-
-        $path = $this->path;
-
-        foreach ($this->parameterNames as $parameterName) {
-            if (!array_key_exists($parameterName, $parameters)) {
-                throw new InvalidArgumentException(sprintf(
-                    'Route [%s] requires parameter [%s] for URL generation.',
-                    $this->path,
-                    $parameterName
-                ));
-            }
-
-            $path = str_replace(
-                '{' . $parameterName . '}',
-                rawurlencode((string) $parameters[$parameterName]),
-                $path
-            );
-        }
-
-        return $path;
-    }
-
-    /**
-     * Компилирует route path в regex и фиксирует список параметров.
-     *
-     * @return array{0: non-empty-string, 1: list<string>, 2: bool}
-     */
-    private static function compilePath(string $path): array
-    {
-        if ($path === '/') {
-            return ['#^/$#', [], true];
-        }
-
-        $segments = explode('/', trim($path, '/'));
-        $parameterNames = [];
-        $patternSegments = [];
-
-        foreach ($segments as $segment) {
-            if (preg_match('/^\{([A-Za-z_][A-Za-z0-9_]*)\}$/', $segment, $matches) === 1) {
-                $parameterNames[] = $matches[1];
-                $patternSegments[] = sprintf('(?P<%s>[^/]+)', $matches[1]);
-
-                continue;
-            }
-
-            $patternSegments[] = preg_quote($segment, '#');
-        }
-
-        if ($parameterNames === []) {
-            return ['#^' . preg_quote($path, '#') . '$#', [], true];
-        }
-
-        if (count(array_unique($parameterNames)) !== count($parameterNames)) {
-            throw new InvalidArgumentException(sprintf('Route path [%s] contains duplicate parameter names.', $path));
-        }
-
-        return ['#^/' . implode('/', $patternSegments) . '$#', $parameterNames, false];
+        return $this->compiledPath->generatePath($parameters);
     }
 
     private static function normalizeName(string $name): string

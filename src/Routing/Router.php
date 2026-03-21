@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Framework\Routing;
 
+use Framework\Routing\Exception\UrlGenerationException;
 use InvalidArgumentException;
 
 /**
@@ -53,6 +54,7 @@ final class Router
     {
         $normalizedMethod = strtoupper($method);
         $normalizedPath = Route::normalizePath($path);
+        /** @var array<string, Route>&array{GET?: Route} $staticRoutes */
         $staticRoutes = $this->staticRoutes[$normalizedPath] ?? [];
 
         if (isset($staticRoutes[$normalizedMethod])) {
@@ -96,13 +98,15 @@ final class Router
      * Генерирует path по имени маршрута и набору route parameters.
      *
      * @param array<string, string|int|float> $parameters
+     *
+     * @throws UrlGenerationException
      */
     public function url(string $name, array $parameters = []): string
     {
         $route = $this->namedRoutes[$name] ?? null;
 
         if ($route === null) {
-            throw new InvalidArgumentException(sprintf('Route name [%s] is not registered.', $name));
+            throw UrlGenerationException::unknownRouteName($name);
         }
 
         return $route->generatePath($parameters);

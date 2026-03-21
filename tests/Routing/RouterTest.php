@@ -6,6 +6,7 @@ namespace Framework\Tests\Routing;
 
 use Framework\Routing\RouteCollection;
 use Framework\Routing\RouteCollector;
+use Framework\Routing\Exception\UrlGenerationException;
 use Framework\Routing\RouteMatchStatus;
 use Framework\Routing\Router;
 use Framework\Tests\Support\FrameworkTestCase;
@@ -85,6 +86,20 @@ final class RouterTest extends FrameworkTestCase
         self::assertSame(['id' => '42'], $dynamicMatch->parameters());
     }
 
+    public function testRouterAppliesRouteParameterConstraintsDuringMatching(): void
+    {
+        $collector = new RouteCollector(new RouteCollection());
+        $collector->get('/users/{id:\d+}', 'user-handler');
+
+        $router = new Router($collector->collection());
+        $matched = $router->match('GET', '/users/42');
+        $notFound = $router->match('GET', '/users/forty-two');
+
+        self::assertSame(RouteMatchStatus::Found, $matched->status());
+        self::assertSame(['id' => '42'], $matched->parameters());
+        self::assertSame(RouteMatchStatus::NotFound, $notFound->status());
+    }
+
     public function testRouterIncludesHeadInAllowedMethodsWhenGetIsSupported(): void
     {
         $collector = new RouteCollector(new RouteCollection());
@@ -101,15 +116,28 @@ final class RouterTest extends FrameworkTestCase
     {
         $collector = new RouteCollector(new RouteCollection());
         $collector->get('/status', 'status-handler')->name('status.show');
-        $collector->get('/users/{id}/posts/{slug}', 'post-handler')->name('users.posts.show');
+        $collector->get('/users/{id:\d+}/posts/{slug:[a-z0-9-]+}', 'post-handler')->name('users.posts.show');
 
         $router = new Router($collector->collection());
 
         self::assertSame('/status', $router->url('status.show'));
-        self::assertSame('/users/42/posts/hello%20world', $router->url('users.posts.show', [
+        self::assertSame('/users/42/posts/hello-world', $router->url('users.posts.show', [
             'id' => 42,
-            'slug' => 'hello world',
+            'slug' => 'hello-world',
         ]));
+    }
+
+    public function testRouterRejectsUnexpectedParametersDuringUrlGeneration(): void
+    {
+        $collector = new RouteCollector(new RouteCollection());
+        $collector->get('/users/{id:\d+}', 'user-handler')->name('users.show');
+
+        $router = new Router($collector->collection());
+
+        $this->expectException(UrlGenerationException::class);
+        $this->expectExceptionMessage('does not define parameter(s) [extra]');
+
+        $router->url('users.show', ['id' => 42, 'extra' => 'ignored']);
     }
 
     public function testRouterRejectsUnknownOrDuplicateNamedRoutes(): void
@@ -122,7 +150,7 @@ final class RouterTest extends FrameworkTestCase
         try {
             $router->url('missing.route');
             self::fail('Expected an exception for an unknown route name.');
-        } catch (\InvalidArgumentException $exception) {
+        } catch (UrlGenerationException $exception) {
             self::assertStringContainsString('is not registered', $exception->getMessage());
         }
 

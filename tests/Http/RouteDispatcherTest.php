@@ -66,8 +66,10 @@ final class RouteDispatcherTest extends FrameworkTestCase
                 $id = 'missing';
 
                 if (is_array($parametersAttribute)) {
+                    /** @var array{id?: mixed} $routeParameters */
+                    $routeParameters = $parametersAttribute;
                     /** @var mixed $parameterId */
-                    $parameterId = $parametersAttribute['id'] ?? null;
+                    $parameterId = $routeParameters['id'] ?? null;
 
                     if (is_string($parameterId)) {
                         $id = $parameterId;
@@ -97,6 +99,20 @@ final class RouteDispatcherTest extends FrameworkTestCase
         )->handle($this->request('GET', '/users/42'));
 
         self::assertSame('/users/{id}|42|route', (string) $response->getBody());
+    }
+
+    public function testRouteDispatcherTreatsConstraintMismatchesAsNotFound(): void
+    {
+        $collector = new RouteCollector(new RouteCollection());
+        $collector->get(
+            '/users/{id:\d+}',
+            static fn (): ResponseInterface => new Response(200, [], 'ok')
+        );
+
+        $response = $this->dispatcher($collector)->handle($this->request('GET', '/users/forty-two'));
+
+        self::assertSame(404, $response->getStatusCode());
+        self::assertSame('Not Found', (string) $response->getBody());
     }
 
     /**

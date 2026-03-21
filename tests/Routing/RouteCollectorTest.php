@@ -20,10 +20,12 @@ final class RouteCollectorTest extends FrameworkTestCase
         $collector->get('/users/{id}', 'user-handler')->name('users.show');
 
         $routes = $collector->collection()->all();
+        $route = array_shift($routes);
 
-        self::assertCount(1, $routes);
-        self::assertSame('users.show', $routes[0]->name());
-        self::assertSame('/users/{id}', $routes[0]->path());
+        self::assertNotNull($route);
+        self::assertCount(0, $routes);
+        self::assertSame('users.show', $route->name());
+        self::assertSame('/users/{id}', $route->path());
     }
 
     public function testRouteCollectorAppliesNestedGroupPrefixesAndMiddleware(): void
@@ -37,13 +39,15 @@ final class RouteCollectorTest extends FrameworkTestCase
         }, [GlobalOneMiddleware::class]);
 
         $routes = $collector->collection()->all();
+        $route = array_shift($routes);
 
-        self::assertCount(1, $routes);
-        self::assertSame('/api/v1/users/{id}', $routes[0]->path());
-        self::assertSame('api.users.show', $routes[0]->name());
+        self::assertNotNull($route);
+        self::assertCount(0, $routes);
+        self::assertSame('/api/v1/users/{id}', $route->path());
+        self::assertSame('api.users.show', $route->name());
         self::assertSame(
             [GlobalOneMiddleware::class, GlobalTwoMiddleware::class, RouteMiddleware::class],
-            $routes[0]->middleware()
+            $route->middleware()
         );
     }
 
@@ -57,9 +61,11 @@ final class RouteCollectorTest extends FrameworkTestCase
         $collector->get('/health', 'health-handler');
 
         $routes = $collector->collection()->all();
+        $route = array_shift($routes);
 
-        self::assertCount(1, $routes);
-        self::assertSame('/health', $routes[0]->path());
-        self::assertSame([], $routes[0]->middleware());
+        self::assertNotNull($route);
+        self::assertCount(0, $routes);
+        self::assertSame('/health', $route->path());
+        self::assertSame([], $route->middleware());
     }
 }

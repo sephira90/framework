@@ -11,4 +11,9 @@ final class RouteAttributes
 {
     public const ROUTE = 'framework.route';
     public const PARAMS = 'framework.route_params';
+
+    /** @psalm-suppress UnusedConstructor */
+    private function __construct()
+    {
+    }
 }
