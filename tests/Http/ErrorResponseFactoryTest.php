@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace Framework\Tests\Http;
 
 use Framework\Http\ErrorResponseFactory;
+use Framework\Http\Exception\ForbiddenException;
+use Framework\Http\Exception\MethodNotAllowedException;
+use Framework\Http\Exception\NotFoundException;
+use Framework\Http\Exception\UnprocessableEntityException;
 use Framework\Tests\Support\FrameworkTestCase;
 use Nyholm\Psr7\Factory\Psr17Factory;
 use RuntimeException;
@@ -46,6 +50,31 @@ final class ErrorResponseFactoryTest extends FrameworkTestCase
         self::assertSame(500, $response->getStatusCode());
         self::assertStringContainsString('RuntimeException: boom', $body);
         self::assertStringContainsString('ErrorResponseFactoryTest.php', $body);
+    }
+
+    public function testFactoryBuildsResponsesFromControlledHttpExceptions(): void
+    {
+        $notFound = $this->factory(debug: false)->fromHttpException(new NotFoundException());
+        $forbidden = $this->factory(debug: false)->fromHttpException(new ForbiddenException('Access denied'));
+        $methodNotAllowedException = new MethodNotAllowedException(['post', 'get']);
+        $methodNotAllowed = $this->factory(debug: false)->fromHttpException($methodNotAllowedException);
+        $unprocessable = $this->factory(debug: false)->fromHttpException(
+            new UnprocessableEntityException('Validation failed')
+        );
+
+        self::assertSame(404, $notFound->getStatusCode());
+        self::assertSame('Not Found', (string) $notFound->getBody());
+
+        self::assertSame(403, $forbidden->getStatusCode());
+        self::assertSame('Access denied', (string) $forbidden->getBody());
+
+        self::assertSame(['GET', 'HEAD', 'POST'], $methodNotAllowedException->allowedMethods());
+        self::assertSame(405, $methodNotAllowed->getStatusCode());
+        self::assertSame(['GET, HEAD, POST'], $methodNotAllowed->getHeader('Allow'));
+        self::assertSame('Method Not Allowed', (string) $methodNotAllowed->getBody());
+
+        self::assertSame(422, $unprocessable->getStatusCode());
+        self::assertSame('Validation failed', (string) $unprocessable->getBody());
     }
 
     private function factory(bool $debug): ErrorResponseFactory

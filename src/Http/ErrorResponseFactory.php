@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Framework\Http;
 
+use Framework\Http\Exception\HttpException;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamFactoryInterface;
@@ -39,6 +40,18 @@ final readonly class ErrorResponseFactory
         return $this->textResponse(405, 'Method Not Allowed', [
             'Allow' => implode(', ', $allowedMethods),
         ]);
+    }
+
+    /**
+     * Строит response из контролируемого HTTP-исключения.
+     */
+    public function fromHttpException(HttpException $exception): ResponseInterface
+    {
+        return $this->textResponse(
+            $exception->statusCode(),
+            $exception->getMessage(),
+            $exception->headers(),
+        );
     }
 
     /**

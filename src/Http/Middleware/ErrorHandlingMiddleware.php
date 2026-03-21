@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Framework\Http\Middleware;
 
 use Framework\Http\ErrorResponseFactory;
+use Framework\Http\Exception\HttpException;
 use Override;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -31,6 +32,8 @@ final readonly class ErrorHandlingMiddleware implements MiddlewareInterface
     {
         try {
             return $handler->handle($request);
+        } catch (HttpException $exception) {
+            return $this->errorResponseFactory->fromHttpException($exception);
         } catch (Throwable $throwable) {
             return $this->errorResponseFactory->internalServerError($throwable);
         }
