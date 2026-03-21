@@ -1,29 +1,45 @@
-# Архитектура Framework v0
+# Архитектура Framework Core
 
 ## 1. Назначение документа
 
-Этот документ объясняет архитектуру, структуру каталогов, request lifecycle, bootstrap-процесс, ключевые инварианты и ограничения текущего ядра.
+Этот документ объясняет текущую архитектуру framework core как системы:
 
-Его цель не просто перечислить файлы, а дать модель, по которой можно самостоятельно реконструировать поведение фреймворка.
+- где проходят границы;
+- что является shared bootstrap;
+- как разделены HTTP и CLI runtime axes;
+- какие инварианты защищает каждая подсистема;
+- где система сознательно узкая;
+- как её читать и развивать без магии.
+
+Цель документа не перечислить файлы, а дать модель, по которой можно самостоятельно реконструировать поведение фреймворка.
 
 ---
 
-## 2. Что такое текущий framework
+## 2. Что представляет собой текущий framework
 
-Текущий `v0` — это минимальное синхронное HTTP-ядро.
+Текущий framework — это минимальный synchronous core с двумя execution axes:
 
-Его задача:
+- HTTP runtime;
+- Console runtime.
 
-- принять HTTP-запрос;
-- превратить его в `ServerRequestInterface`;
-- пропустить через глобальные middleware;
-- сматчить маршрут;
-- разрешить handler;
-- применить route-level middleware;
-- вернуть `ResponseInterface`;
-- отправить ответ клиенту.
+Они делят:
 
-Это не full-stack framework. Это core, который показывает скелет веб-системы без дополнительных платформенных слоёв.
+- `.env` bootstrap;
+- configuration model;
+- explicit container;
+- internal bootstrap lifecycle.
+
+Они не делят runtime-specific services:
+
+- HTTP path имеет request factory, router, middleware pipeline, response emitter;
+- CLI path имеет argv parser, command registry, command resolver, console output и console error boundary.
+
+Это не full-stack framework. Это deliberately narrow core, который показывает:
+
+- как собирается runtime;
+- как поднимается конфигурация;
+- как описываются зависимости;
+- как HTTP и CLI получают разные execution models поверх одного bootstrap layer.
 
 ---
 
@@ -34,24 +50,27 @@
 - bootstrap окружения;
 - immutable config repository;
 - explicit DI container;
-- route collection и router;
-- handler и middleware resolution;
-- HTTP application/kernel;
-- error-to-response conversion;
-- SAPI response emission.
+- internal provider lifecycle;
+- HTTP routing и HTTP execution path;
+- CLI command registration и CLI execution path;
+- error boundaries для HTTP и CLI.
 
-### Что не входит в ядро
+### Что сознательно не входит в ядро
 
-- persistence;
-- templates;
-- console runtime;
-- auth/session/security stack;
+- ORM и persistence layer;
+- template/view system;
 - events;
-- queues;
-- advanced routing features;
-- autowiring by default.
+- queues и scheduler;
+- session/auth/csrf stack;
+- public provider API;
+- autowiring by default;
+- advanced console UX:
+  - short options;
+  - interactive prompts;
+  - ANSI styling;
+  - autodiscovery.
 
-Эти ограничения важны, потому что иначе можно ошибочно считать часть `v0` "незавершённой", хотя она просто intentionally narrow.
+Эти ограничения важны. Иначе легко принять deliberately narrow design за «недоделанность», хотя это осознанная граница модели.
 
 ---
 
@@ -61,481 +80,558 @@
 
 Отвечает за конфигурацию и окружение.
 
-- `Config` — immutable repository поверх массива конфигурации;
-- `ConfigLoader` — загружает либо один PHP config file, либо `config/` directory в изолированном scope и применяет deterministic merge strategy;
-- `Env` — читает переменные окружения;
-- `EnvironmentLoader` — поднимает `.env` до сборки runtime без process-level кеша путей;
-- `InvalidConfigurationException` — сигнализирует о плохой конфигурации.
+- `Config` — immutable repository поверх config array
+- `ConfigLoader` — загружает `config/` directory и детерминированно мерджит config slices
+- `Env` — читает переменные окружения
+- `EnvironmentLoader` — поднимает `.env` до сборки runtime
+- `InvalidConfigurationException` — сигнал о плохой конфигурации
 
 ### `src/Container`
 
-Отвечает за явную сборку зависимостей.
+Отвечает за explicit dependency graph.
 
-- `ContainerBuilder` — регистрирует definitions и aliases;
-- `Container` — разрешает сервисы;
-- `ServiceDefinition` — хранит factory, shared semantics и precomputed invocation mode;
-- `ContainerException` / `NotFoundException` — ошибки контейнера.
+- `ContainerBuilder` — регистрирует bindings, singletons и aliases
+- `Container` — резолвит сервисы
+- `ServiceDefinition` — хранит factory, shared semantics и precomputed invocation mode
+- `ContainerException` / `NotFoundException` — ошибки контейнера
 
 ### `src/Routing`
 
-Отвечает за описание маршрутов и матчинг.
+Отвечает за HTTP route model.
 
-- `Route` — маршрут с методами, path, handler и middleware;
-- `RouteCollection` — список маршрутов;
-- `RouteCollector` — API регистрации маршрутов, route groups и inherited route metadata;
-- `RouteBuilder` — fluent post-registration API для route metadata;
-- `Router` — матчинг method + path и URL generation по имени маршрута;
-- `RouteMatch` / `RouteMatchStatus` — результат матчинга;
-- `RouteAttributes` — имена request-атрибутов, куда кладётся matched route и params.
+- `Route` — immutable описание маршрута
+- `RouteCollection` — ordered collection маршрутов
+- `RouteCollector` — registration API
+- `RouteBuilder` — fluent metadata seam
+- `Router` — matching и URL generation
+- `RouteMatch` / `RouteMatchStatus` — typed result matching
+- `RouteAttributes` — request attribute names для matched route и params
 
 ### `src/Http`
 
-Отвечает за runtime-исполнение HTTP запроса.
+Отвечает за HTTP execution path.
 
-- `HandlerResolver` — превращает route handler definition в исполнимый handler;
-- `MiddlewareResolver` — превращает middleware definition в `MiddlewareInterface`;
-- `MiddlewareDispatcher` — строит pipeline;
-- `RouteDispatcher` — соединяет router, route attributes и route-level middleware;
-- `RouteHandler` — адаптер между route и handler resolver;
-- `RequestFactory` — создаёт request из globals;
-- `ResponseEmitter` — отправляет PSR-7 response в SAPI;
-- `ErrorResponseFactory` — строит стандартные error responses;
-- `Http\Middleware\ErrorHandlingMiddleware` — верхний error boundary;
-- `Http\Exception\*` — ошибки плохих handler/middleware definitions и controlled HTTP exceptions.
+- `RequestFactory` — создаёт `ServerRequestInterface` из globals
+- `HandlerResolver` — превращает handler definition в исполнимый handler
+- `MiddlewareResolver` — превращает middleware definition в `MiddlewareInterface`
+- `MiddlewareDispatcher` — строит pipeline
+- `RouteDispatcher` — связывает router, route attributes и route middleware
+- `RouteHandler` — adapter между `Route` и handler resolution
+- `ResponseEmitter` — отправляет PSR-7 response в SAPI
+- `ErrorResponseFactory` — строит стандартные error responses
+- `Http\\Middleware\\ErrorHandlingMiddleware` — outer HTTP error boundary
+- `Http\\Exception\\*` — invalid definitions и controlled HTTP exceptions
+
+### `src/Console`
+
+Отвечает за CLI execution path.
+
+- `ArgvInputFactory` — превращает raw `argv` в deterministic `CommandInput`
+- `CommandInput` — immutable snapshot CLI input
+- `CommandCollection` — validated collection зарегистрированных commands
+- `CommandCollector` — registration seam для `commands/console.php`
+- `CommandRegistry` — single-assignment boot state для commands
+- `CommandResolver` — резолвит class command через контейнер
+- `ConsoleApplication` — top-level CLI kernel
+- `ConsoleOutput` — testable adapter над stdout/stderr
+- `ConsoleErrorRenderer` — boundary-level CLI error rendering
+- `CommandInterface` — контракт app command
 
 ### `src/Foundation`
 
-Отвечает за сборку верхнего уровня.
+Отвечает за верхнеуровневую сборку runtime.
 
-- `ApplicationFactory` — тонко оркестрирует bootstrap и запрашивает готовый `HttpRuntime` из контейнера;
-- `Application` — top-level HTTP kernel;
-- `HttpRuntime` — упаковывает application, request factory и emitter.
+- `ApplicationFactory` — собирает HTTP runtime
+- `ConsoleApplicationFactory` — собирает CLI runtime
+- `Application` — top-level HTTP kernel
+- `HttpRuntime` — snapshot готового HTTP runtime
+- `ConsoleRuntime` — snapshot готового CLI runtime
 
 ### `src/Foundation/Bootstrap`
 
-Отвечает за internal bootstrap lifecycle framework.
+Отвечает за shared internal bootstrap lifecycle.
 
-- `Bootstrapper` — прогоняет fixed-order `register -> build container -> boot bootable providers`;
-- `ServiceProviderInterface` — внутренний контракт register phase;
-- `BootableProviderInterface` — дополнительный внутренний контракт для providers, которым нужен post-build boot;
-- `BootstrapBuilder` / `BootstrapContext` — pre-container и post-container contexts;
-- `RouteRegistry` / `GlobalMiddlewareRegistry` — dedicated boot state с single-assignment semantics;
-- `Provider\*` — fixed internal providers для core services, user config, routing и HTTP kernel graph.
+- `Bootstrapper` — прогоняет fixed-order `register -> build -> boot`
+- `ServiceProviderInterface` — register contract
+- `BootableProviderInterface` — optional boot contract
+- `BootstrapBuilder` — pre-container context
+- `BootstrapContext` — post-container context
+- `ContainerAccessor` — typed accessor поверх `ContainerInterface::get()`
+- `RouteRegistry` / `GlobalMiddlewareRegistry` / `CommandRegistry` — dedicated boot state
+- `RoutesFileLoader` / `CommandsFileLoader` — scope-isolated app registration loaders
+- `Provider\\*` — fixed internal providers
 
 ### Прикладной слой
 
-- `app/` — пользовательские handlers;
-- `config/` — app configuration slices и optional environment overlays;
-- `routes/` — route registration;
-- `bootstrap/` — runtime bootstrap;
-- `public/` — front controller.
+- `app/Http/` — прикладные HTTP handlers
+- `app/Console/` — прикладные CLI commands
+- `routes/` — HTTP route registration
+- `commands/` — CLI command registration
+- `config/` — app config slices и overlays
+- `bootstrap/` — bootstrap files для HTTP и CLI
+- `public/` — HTTP entrypoint
+- `bin/` — CLI entrypoint
 
 ---
 
-## 5. Request Lifecycle: полный путь запроса
+## 5. Shared Bootstrap Model
 
-Это центральный процесс всей системы.
+Это центральный слой причинности. HTTP и CLI разные снаружи, но собираются через одну и ту же модель bootstrap.
 
-### Шаг 1. Вход в front controller
+### Entry points
 
-Файл `public/index.php`:
+- HTTP: `public/index.php -> bootstrap/app.php -> ApplicationFactory::createRuntime()`
+- CLI: `bin/console -> bootstrap/console.php -> ConsoleApplicationFactory::createRuntime()`
 
-- создаёт runtime через bootstrap;
-- получает request из globals;
-- передаёт request в application;
-- отдаёт response emitter'у с transport-level policy для `HEAD`.
+### Шаг 1. Environment bootstrap
 
-Это самый внешний слой. Здесь нет routing logic, container logic или бизнес-логики.
-
-### Шаг 2. Bootstrap runtime
-
-Файл `bootstrap/app.php` подключает `vendor/autoload.php` и вызывает `ApplicationFactory::createRuntime(basePath)`.
-
-Это означает: front controller остаётся тонким, а `ApplicationFactory` управляет только верхним bootstrap flow, не собирая runtime graph вручную.
-
-### Шаг 3. Загрузка окружения и конфигурации
-
-`ApplicationFactory` сначала создаёт `EnvironmentLoader` и вызывает `load(basePath)`.
-
-Смысл:
-
-- `.env` должен быть подгружен до чтения `config/`;
-- конфигурация может использовать `Env::get()` и `Env::bool()`;
-- один и тот же `basePath` можно повторно загрузить в том же процессе, если окружение между bootstrap-циклами было очищено;
-- после этого `ConfigLoader` детерминированно мерджит top-level `config/*.php` и затем может применить `config/environments/<app.env>.php`.
+Обе factory сначала создают `EnvironmentLoader` и вызывают `load(basePath)`.
 
 Инвариант:
 
-- к моменту сборки container config уже должен быть полностью определён.
+- `.env` поднимается до чтения `config/`;
+- loader stateless и не хранит process-level cache путей;
+- повторный bootstrap того же `basePath` зависит от текущего состояния окружения, а не от истории процесса.
 
-### Шаг 4. Internal bootstrap lifecycle
+### Шаг 2. Config assembly
 
-После загрузки config `ApplicationFactory` создаёт `Bootstrapper` с fixed provider order:
+Обе factory вызывают `ConfigLoader::load(basePath . '/config')`.
 
-1. `CoreServicesProvider`
+Инвариант:
+
+- top-level `config/*.php` мерджатся в детерминированном отсортированном порядке;
+- associative arrays мерджатся рекурсивно;
+- list arrays заменяются целиком;
+- optional overlay `config/environments/<app.env>.php` применяется после базовой сборки;
+- `require` изолирован, поэтому config file не получает доступ к локальному scope loader'а.
+
+### Шаг 3. Fixed provider order
+
+После загрузки config обе factory создают `Bootstrapper`, но с разным provider graph.
+
+#### HTTP provider order
+
+1. `SharedServicesProvider`
 2. `ConfiguredServicesProvider`
-3. `RoutingServiceProvider`
-4. `HttpKernelProvider`
+3. `HttpCoreServicesProvider`
+4. `RoutingServiceProvider`
+5. `HttpKernelProvider`
+
+#### CLI provider order
+
+1. `SharedServicesProvider`
+2. `ConfiguredServicesProvider`
+3. `ConsoleCommandsProvider`
+4. `ConsoleKernelProvider`
 
 Инвариант:
 
-- порядок providers hardcoded;
+- provider order hardcoded;
 - providers internal-only;
 - приложение не конфигурирует provider list;
-- `config/` и `routes/web.php` остаются primary app model.
+- `config/`, `routes/web.php` и `commands/console.php` остаются primary app model.
 
-### Шаг 5. Register phase
+### Шаг 4. Register phase
 
-На фазе `register` providers только описывают service graph:
+На фазе `register` providers только описывают service graph.
 
-- `CoreServicesProvider` регистрирует `Config`, PSR-17 factory, `RequestFactory`, `ResponseEmitter`, `ErrorResponseFactory`, `ErrorHandlingMiddleware`;
-- `ConfiguredServicesProvider` применяет пользовательские `bindings`, `singletons`, `aliases`;
-- `RoutingServiceProvider` регистрирует `RouteRegistry` и container-managed `Router`;
-- `HttpKernelProvider` регистрирует `GlobalMiddlewareRegistry`, `HandlerResolver`, `MiddlewareResolver`, `RouteDispatcher`, `Application`, `HttpRuntime`.
+Ничего нельзя резолвить из ещё не собранного контейнера.
+
+### Шаг 5. Build phase
+
+`ContainerBuilder->build()` материализует container.
 
 Инвариант:
 
-- register phase ничего не резолвит;
-- container остаётся explicit-only;
-- никакого скрытого autowiring нет;
-- если сервис требует constructor dependencies, нужно явное definition.
+- container explicit-only;
+- alias cycles и service cycles считаются ошибкой;
+- invocation mode factory (`requiresContainer`) вычисляется один раз при регистрации, а не в runtime hot path.
 
 ### Шаг 6. Boot phase
 
-После `ContainerBuilder->build()` только bootable providers проходят через `boot`:
+Только bootable providers получают `BootstrapContext`.
 
-- `RoutingServiceProvider` загружает `routes/web.php`, валидирует callable registrar и инициализирует `RouteRegistry`;
-- `HttpKernelProvider` строит global middleware stack из config, проверяет его форму и инициализирует `GlobalMiddlewareRegistry`.
+Они заполняют dedicated boot state:
 
-Только после этого `ApplicationFactory` запрашивает `HttpRuntime` из контейнера.
+- HTTP:
+  - `RouteRegistry`
+  - `GlobalMiddlewareRegistry`
+- CLI:
+  - `CommandRegistry`
 
 Инвариант:
 
-- `RouteRegistry` и `GlobalMiddlewareRegistry` single-assignment;
-- чтение boot state до инициализации считается ошибкой lifecycle;
-- runtime graph теперь container-managed, а не вручную собранный внутри `ApplicationFactory`.
-
-### Шаг 7. Глобальный middleware pipeline
-
-При вызове `Application::handle()`:
-
-- создаётся `MiddlewareDispatcher`;
-- первым глобальным middleware всегда выступает `ErrorHandlingMiddleware`, потому что он кладётся в `GlobalMiddlewareRegistry` ещё на bootstrap phase;
-- затем идут пользовательские global middleware;
-- fallback handler — это `RouteDispatcher`.
-
-Смысл:
-
-- исключения любого нижележащего слоя проходят через единую error boundary;
-- routing остаётся внутренней частью pipeline, а не отдельным параллельным механизмом.
-
-### Шаг 8. Матчинг маршрута
-
-`RouteDispatcher`:
-
-- вызывает `Router::match(method, path)`;
-- получает `RouteMatch`.
-
-`Router` нормализует входной path один раз на boundary routing layer и дальше
-работает уже с канонической формой. `Route` не повторяет ту же нормализацию
-внутри matching helpers: он принимает уже нормализованный path как часть
-внутреннего контракта между слоями.
-
-Возможны три исхода:
-
-1. `Found`
-2. `NotFound`
-3. `MethodNotAllowed`
-
-Если route не найден, `ErrorResponseFactory` строит `404` или `405`.
-Для `405 Method Not Allowed` заголовок `Allow` отражает runtime semantics:
-если путь поддерживает `GET`, в список также включается `HEAD`.
-
-### Шаг 9. Привязка route к request
-
-Если маршрут найден:
-
-- matched `Route` кладётся в request attribute `framework.route`;
-- route params кладутся в `framework.route_params`.
-
-Это важно, потому что нижележащие handlers и middleware могут читать результат routing из самого request, не зная про `Router`.
-
-### Шаг 10. Route-level middleware и handler
-
-После match:
-
-- создаётся `RouteHandler`;
-- создаётся ещё один `MiddlewareDispatcher` уже для route-level middleware;
-- fallback handler там — `RouteHandler`.
-
-`RouteHandler` просто делегирует вызов в `HandlerResolver`.
-
-### Шаг 11. Разрешение handler
-
-`HandlerResolver` принимает либо:
-
-- `Closure`;
-- `class-string`.
-
-Поведение:
-
-- если definition — class-string, container должен вернуть объект;
-- если объект реализует `RequestHandlerInterface`, вызывается `handle()`;
-- если объект или closure callable, он вызывается как callable;
-- результат обязан быть `ResponseInterface`.
-
-Если это не так, кидается `InvalidHandlerException`.
-
-### Шаг 12. Преобразование ошибок в response
-
-Если нижележащий слой бросает `Framework\Http\Exception\HttpException`,
-`ErrorHandlingMiddleware` считает, что клиентская HTTP-семантика уже выбрана явно,
-и вызывает `ErrorResponseFactory::fromHttpException()`.
-
-Если бросается любой другой `Throwable`, middleware считает это неконтролируемой
-ошибкой исполнения и вызывает `ErrorResponseFactory::internalServerError()`.
-
-Поведение зависит от `app.debug`:
-
-- `false` -> короткий `500 Internal Server Error`;
-- `true` -> подробный debug body с классом исключения, сообщением, файлом, строкой и trace.
-
-### Шаг 13. Emission ответа
-
-`ResponseEmitter`:
-
-- выставляет HTTP status code;
-- отправляет все headers;
-- умеет не эмитить body, если transport boundary этого требует;
-- rewind'ит body stream, если он seekable и body вообще должен эмититься;
-- читает stream чанками по `8192` байт;
-- выводит body.
-
-Это последний слой. После него framework core считается завершившим request.
+- registry single-assignment;
+- чтение registry до инициализации считается lifecycle error;
+- bootstrap intentionally fail-fast, если app seams (`routes/web.php`, `commands/console.php`) невалидны.
 
 ---
 
-## 6. Основные инварианты подсистем
+## 6. HTTP Runtime Lifecycle
+
+### Шаг 1. Front controller
+
+`public/index.php`:
+
+- получает `HttpRuntime` из `bootstrap/app.php`;
+- создаёт request через `RequestFactory`;
+- передаёт request в `Application`;
+- передаёт response в `ResponseEmitter`;
+- задаёт transport policy для `HEAD` через `emitBody: false`.
+
+### Шаг 2. Global middleware pipeline
+
+`Application::handle()` строит global pipeline.
+
+Инвариант:
+
+- первым global middleware всегда выступает `ErrorHandlingMiddleware`;
+- пользовательские global middleware идут после него;
+- fallback handler глобального pipeline — `RouteDispatcher`.
+
+### Шаг 3. Route matching
+
+`RouteDispatcher` вызывает `Router::match(method, path)`.
+
+Инвариант:
+
+- path нормализуется один раз на boundary `Router`;
+- static routes приоритетнее dynamic routes;
+- `HEAD` умеет fallback к `GET`, если отдельный `HEAD` маршрут не определён;
+- `405 Allow` включает `HEAD`, если path поддерживает `GET`.
+
+### Шаг 4. Route attachment
+
+При успешном match route и route params кладутся в request attributes:
+
+- `framework.route`
+- `framework.route_params`
+
+Это позволяет middleware и handlers читать результат routing без прямой зависимости от `Router`.
+
+### Шаг 5. Route middleware pipeline
+
+После match `RouteDispatcher` строит второй pipeline уже для route-level middleware.
+
+Fallback handler этого pipeline — `RouteHandler`.
+
+### Шаг 6. Handler resolution
+
+`HandlerResolver` принимает:
+
+- `Closure`
+- любой callable
+- `class-string`
+
+Если definition — `class-string`, container обязан вернуть объект, пригодный к исполнению.
+
+### Шаг 7. Error boundary
+
+`ErrorHandlingMiddleware` различает два типа ошибок:
+
+- `HttpException` — controlled client-facing HTTP semantics;
+- любой другой `Throwable` — unexpected execution failure.
+
+`app.debug` управляет степенью детализации `500`.
+
+### Шаг 8. Response emission
+
+`ResponseEmitter`:
+
+- выставляет status code;
+- отправляет headers;
+- при необходимости пропускает body emission;
+- читает body stream chunked.
+
+На этом HTTP request lifecycle заканчивается.
+
+---
+
+## 7. CLI Runtime Lifecycle
+
+### Шаг 1. CLI entrypoint
+
+`bin/console`:
+
+- получает `ConsoleRuntime` из `bootstrap/console.php`;
+- берёт `$_SERVER['argv']`;
+- строит `CommandInput` через `ArgvInputFactory`;
+- создаёт `ConsoleOutput`;
+- вызывает `ConsoleApplication::run()`;
+- завершает процесс через `exit($code)`.
+
+### Шаг 2. Command registration bootstrap
+
+Во время boot `ConsoleCommandsProvider`:
+
+- читает `console.commands` из config;
+- загружает `commands/console.php` через scope-isolated `require`;
+- валидирует, что registrar callable;
+- инициализирует `CommandRegistry`.
+
+### Шаг 3. Parser contract
+
+`ArgvInputFactory` фиксирует narrow parser semantics:
+
+- `argv[0]` считается script name и игнорируется;
+- первый remaining token — command name;
+- `--key=value` -> option со строковым значением;
+- `--flag` -> option со значением `true`;
+- `--` завершает option parsing;
+- repeated options -> last wins;
+- всё остальное -> positional args.
+
+Явно вне `v0`:
+
+- short options;
+- bundled flags;
+- `--key value`;
+- interactive prompts;
+- ANSI styling.
+
+### Шаг 4. Missing/unknown command boundary
+
+`ConsoleApplication` сначала проверяет наличие command name и command registration.
+
+Если команда отсутствует или неизвестна:
+
+- пишет short usage в `stderr`;
+- печатает список зарегистрированных команд;
+- возвращает exit code `1`.
+
+### Шаг 5. Command resolution
+
+`CommandResolver` принимает только `class-string<CommandInterface>`.
+
+Он резолвит команду через container и валидирует, что объект реализует `CommandInterface`.
+
+### Шаг 6. Command execution
+
+Команда получает:
+
+- `CommandInput`
+- `ConsoleOutput`
+
+Framework не навязывает return-value magic:
+
+- команда сама решает, что писать в stdout/stderr;
+- команда сама возвращает exit code.
+
+### Шаг 7. Console error boundary
+
+`ConsoleApplication` ловит неожиданный `Throwable` и делегирует его в `ConsoleErrorRenderer`.
+
+Поведение зависит от `app.debug`:
+
+- `false` -> `Command failed.`
+- `true` -> class, message, file:line и trace
+
+### Шаг 8. Process exit
+
+`bin/console` завершает процесс тем кодом, который вернул `ConsoleApplication`.
+
+CLI path не делает дополнительной магии поверх exit codes.
+
+---
+
+## 8. Ключевые инварианты подсистем
 
 ### Config
 
 - `Config` immutable;
-- dotted access не создаёт значения, только читает;
-- `ConfigLoader` принимает либо один файл, либо config directory;
-- top-level `config/*.php` мерджатся детерминированно в отсортированном порядке;
-- associative arrays мерджатся рекурсивно, list arrays заменяются целиком, а не склеиваются;
-- optional overlay из `config/environments/<app.env>.php` применяется после базовой сборки;
-- конфиг не должен содержать сложную runtime-логику.
+- dotted access только читает данные;
+- config files должны возвращать arrays;
+- config loader детерминирован и scope-isolated.
 
 ### Container
 
 - сервис либо зарегистрирован явно, либо его нет;
-- aliases разрешаются детерминированно;
-- alias cycles и circular dependencies считаются ошибкой;
-- singleton и transient semantics различаются явно.
+- autowiring по умолчанию отсутствует;
+- singleton и transient semantics различаются явно;
+- container может вернуть только то, что было описано definitions graph.
 
 ### Routing
 
-- path нормализуется;
-- static routes приоритетнее dynamic routes;
-- route match возвращает не `null`, а типизированный результат.
+- routing boundary владеет нормализацией path;
+- match возвращает typed result, а не `null`;
+- route names уникальны;
+- route groups живут только на registration layer.
 
-### HTTP execution
+### Console
 
-- global middleware всегда снаружи;
-- route middleware всегда внутри matched route;
-- handler всегда вызывается последним;
-- ошибки любого слоя поднимаются к единому boundary.
+- commands регистрируются явно;
+- command names trimmed, non-empty и уникальны;
+- `CommandRegistry` не допускает partial initialization;
+- parser contract узкий и детерминированный.
 
-### Foundation
+### Foundation / Bootstrap
 
-- bootstrap-логика централизована;
-- `ApplicationFactory` больше не держит ручную сборку runtime graph;
-- internal providers управляют lifecycle в фиксированном порядке;
-- не каждый provider обязан иметь boot phase;
-- boot state хранится в dedicated registries, а не в скрытой локальной магии;
-- `Application` не знает, как собирать container или routes;
-- `HttpRuntime` — это уже собранный runtime, а не builder.
+- runtime factories тонкие;
+- bootstrap lifecycle fixed-order;
+- providers internal-only;
+- dedicated registries защищают boot state от неявной частичной сборки.
 
 ---
 
-## 7. Точки расширения
+## 9. Точки расширения
 
-В текущем `v0` точки расширения сознательно узкие:
+В текущем core расширяемость специально узкая.
+
+### Shared
 
 - `config/*.php`
+- environment overlays
+- container `bindings`, `singletons`, `aliases`
+
+### HTTP
+
 - `routes/web.php`
-- container `bindings/singletons/aliases`
 - global middleware
-- route-level middleware
+- route middleware
 - handlers
 
-Это сделано специально, чтобы система оставалась реконструируемой.
+### CLI
+
+- `commands/console.php`
+- class commands в `app/Console/`
+
+Это сделано специально: система должна оставаться реконструируемой.
 
 ---
 
-## 8. Ограничения и сознательные компромиссы
-
-### Почему нет autowiring
-
-Потому что для `v0` важнее:
-
-- явность;
-- простота диагностики;
-- прозрачность причинности;
-- учебная реконструируемость.
-
-Autowiring удобнее, но скрывает больше правил.
-
-### Почему нет public service providers
-
-В текущей архитектуре уже есть internal bootstrap providers, но нет public provider layer для приложения.
-
-Это сделано специально:
-
-- lifecycle нужен framework core, но пока не должен становиться новым app-level API;
-- приложение по-прежнему описывается через `config/` и `routes/web.php`;
-- provider order остаётся закрытым и фиксированным, чтобы не размывать причинную модель bootstrap;
-- это даёт выигрыш по связности `ApplicationFactory`, не превращая `v0` в plugin platform раньше необходимости.
-
-### Почему `Route` хранит compiled state
-
-Потому что в текущем масштабе выгоднее держать данные маршрута и его matching behavior вместе, чем разносить один концепт по нескольким типам.
+## 10. Сознательные ограничения и trade-offs
 
 ### Почему container explicit-only
 
-Потому что это уменьшает магию и делает цену каждой зависимости видимой в конфигурации.
+Потому что для этого core важнее:
+
+- analyzability;
+- error clarity;
+- явная цена зависимости;
+- учебная реконструируемость.
+
+### Почему providers internal-only
+
+Потому что bootstrap lifecycle нужен framework core, но пока не должен становиться отдельным public API приложения.
+
+### Почему CLI parser намеренно узкий
+
+Потому что первая версия решает задачу app command execution, а не построение feature-rich console platform.
+
+### Почему нет built-in `help` / `list` как отдельных commands
+
+Потому что для `v0` достаточно boundary-level usage message и registered names. Это дешевле и честнее, чем ранний мини-Symfony Console.
 
 ---
 
-## 9. Типичные failure modes
+## 11. Типичные failure modes
 
 ### Неправильный config
 
-Если `config/` отсутствует, пуст, не читается или любой config file возвращает не массив, будет `InvalidConfigurationException`.
+Если config files отсутствуют, не читаются или возвращают не массивы, bootstrap ломается через `InvalidConfigurationException`.
 
 ### Неправильный routes file
 
-Если routes file не существует или не возвращает callable, runtime не соберётся.
+Если `routes/web.php` не существует или не возвращает callable registrar, HTTP runtime не соберётся.
 
-### Нарушен bootstrap lifecycle
+### Неправильный commands file
 
-Если internal boot state читается до инициализации, container resolution завершается ошибкой lifecycle. Это защищает систему от частично собранного runtime graph.
+Если `commands/console.php` не существует или не возвращает callable registrar, CLI runtime не соберётся.
 
-### Не зарегистрирован handler или middleware
+### Нарушение bootstrap lifecycle
 
-Если class-string не резолвится container'ом, произойдёт ошибка разрешения сервиса и в HTTP path она станет `500`.
+Чтение `RouteRegistry`, `GlobalMiddlewareRegistry` или `CommandRegistry` до `initialize()` считается lifecycle error.
 
-### Handler вернул не `ResponseInterface`
+### Не зарегистрированный handler / middleware / command
 
-Это считается ошибкой контракта и приводит к `InvalidHandlerException`.
+Если `class-string` не резолвится контейнером, ошибка поднимается в boundary соответствующего runtime:
 
-### Middleware не реализует `MiddlewareInterface`
+- HTTP -> `500`
+- CLI -> debug/non-debug console error и exit code `1`
 
-Это считается ошибкой контракта и приводит к `InvalidMiddlewareException`.
+### Неверный command class
 
-### Cycle в aliases или service resolution
-
-Container обнаруживает цикл и выбрасывает `ContainerException`.
+Если registered command class не реализует `CommandInterface`, bootstrap ломается fail-fast ещё на registration layer.
 
 ---
 
-## 10. Как читать код, чтобы понять систему полностью
+## 12. Как читать код, чтобы понять систему
 
-### Первый проход: архитектурный
+### Первый проход: shared bootstrap
+
+1. `bootstrap/app.php`
+2. `bootstrap/console.php`
+3. `src/Foundation/ApplicationFactory.php`
+4. `src/Foundation/ConsoleApplicationFactory.php`
+5. `src/Foundation/Bootstrap/Bootstrapper.php`
+6. `src/Foundation/Bootstrap/Provider/*`
+
+Цель:
+- понять shared causality и runtime split.
+
+### Второй проход: HTTP axis
 
 1. `public/index.php`
-2. `bootstrap/app.php`
-3. `src/Foundation/ApplicationFactory.php`
-4. `src/Foundation/Bootstrap/Bootstrapper.php`
-5. `src/Foundation/Bootstrap/Provider/*`
-6. `src/Foundation/Application.php`
-7. `src/Foundation/HttpRuntime.php`
+2. `src/Foundation/Application.php`
+3. `src/Foundation/HttpRuntime.php`
+4. `src/Http/MiddlewareDispatcher.php`
+5. `src/Http/RouteDispatcher.php`
+6. `src/Http/HandlerResolver.php`
+7. `src/Routing/Router.php`
 
 Цель:
-- понять сборку runtime и верхний request flow.
+- восстановить HTTP request lifecycle.
 
-### Второй проход: исполнение HTTP запроса
+### Третий проход: CLI axis
 
-1. `src/Http/MiddlewareDispatcher.php`
-2. `src/Http/RouteDispatcher.php`
-3. `src/Http/RouteHandler.php`
-4. `src/Http/HandlerResolver.php`
-5. `src/Http/MiddlewareResolver.php`
-6. `src/Http/ErrorResponseFactory.php`
-7. `src/Http/Middleware/ErrorHandlingMiddleware.php`
-8. `src/Http/ResponseEmitter.php`
+1. `bin/console`
+2. `src/Foundation/ConsoleRuntime.php`
+3. `src/Console/ArgvInputFactory.php`
+4. `src/Console/ConsoleApplication.php`
+5. `src/Console/CommandResolver.php`
+6. `commands/console.php`
 
 Цель:
-- понять фактический execution path запроса.
-
-### Третий проход: routing
-
-1. `src/Routing/RouteCollector.php`
-2. `src/Routing/Route.php`
-3. `src/Routing/RouteCollection.php`
-4. `src/Routing/Router.php`
-5. `src/Routing/RouteMatch.php`
-
-Цель:
-- понять, как route описывается, компилируется и матчится.
+- восстановить CLI process flow.
 
 ### Четвёртый проход: config и container
 
 1. `src/Config/EnvironmentLoader.php`
-2. `src/Config/Env.php`
-3. `src/Config/ConfigLoader.php`
-4. `src/Config/Config.php`
-5. `src/Container/ContainerBuilder.php`
-6. `src/Container/Container.php`
-7. `src/Foundation/Bootstrap/ConfiguredServicesRegistrar.php`
+2. `src/Config/ConfigLoader.php`
+3. `src/Config/Config.php`
+4. `src/Container/ContainerBuilder.php`
+5. `src/Container/Container.php`
+6. `src/Foundation/Bootstrap/ConfiguredServicesRegistrar.php`
 
-Цель:
-- понять, как runtime получает свои зависимости и настройки.
-
-### Пятый проход: калибровка через тесты
+### Пятый проход: calibration через tests
 
 1. `tests/Foundation/ApplicationFactoryTest.php`
-2. `tests/Foundation/Bootstrap/ProviderIntegrationTest.php`
-3. `tests/Routing/RouterTest.php`
-4. `tests/Container/ContainerTest.php`
-5. `tests/Config/ConfigTest.php`
-
-Цель:
-- сверить модель системы с формально зафиксированным поведением.
+2. `tests/Foundation/ConsoleApplicationFactoryTest.php`
+3. `tests/Foundation/Bootstrap/ProviderIntegrationTest.php`
+4. `tests/Foundation/Bootstrap/ConsoleProviderIntegrationTest.php`
+5. `tests/Console/*`
 
 ---
 
-## 11. Процессы проекта
+## 13. Процесс разработки
 
-### Процесс разработки
+Каждое существенное изменение проходит один и тот же цикл:
 
-1. определить границы изменения;
-2. назвать инварианты;
-3. внести изменение;
+1. определить границы и инварианты;
+2. внести изменение;
+3. обновить документацию;
 4. прогнать `composer qa`;
 5. прогнать `composer test`;
-6. записать результат в `artifacts/execution/`.
+6. зафиксировать шаг в `artifacts/execution/`.
 
-### Процесс чтения и обучения
+Текущий baseline после введения console kernel:
 
-1. сначала читать обзорную архитектуру;
-2. затем идти по execution path;
-3. затем читать tests как независимую калибровку;
-4. после этого пытаться воспроизвести модель своими словами.
-
-### Процесс принятия архитектурных решений
-
-Каждое нетривиальное изменение нужно оценивать по вопросам:
-
-- это исправляет дефект или добавляет capability;
-- какую цену это добавляет к ядру;
-- улучшает ли это analyzability;
-- уменьшает ли change cost;
-- не заменяет ли это явность магией.
+- `composer qa` — green
+- `composer test` — green
+- `98 tests / 290 assertions`
 
 ---
 
-## 12. Краткая модель системы в одной фразе
+## 14. Краткая модель системы в одной фразе
 
-Framework `v0` — это explicit, PSR-first, synchronous HTTP kernel, который собирает runtime из config и routes, прогоняет request через middleware и router, разрешает handler через container и возвращает PSR-7 response, сохраняя ядро минимальным и реконструируемым.
+Framework core — это explicit shared bootstrap layer с двумя runtime axes: HTTP kernel для request/response execution и console kernel для command execution, которые делят config и container, но не смешивают runtime-specific semantics.

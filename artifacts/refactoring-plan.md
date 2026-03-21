@@ -6,288 +6,277 @@
 
 ## 1. Назначение документа
 
-Живая карта инженерного состояния проекта:
+Это не wishlist и не список всего, чего ещё нет.
 
-- что реализовано и стабилизировано;
-- какие ещё есть точки давления;
-- куда двигаться дальше.
+Это живая карта инженерного состояния проекта:
 
-Не список "всего чего нет". Не wishlist. Карта реального давления.
+- что уже стабилизировано;
+- какие реальные pressure points ещё остались;
+- куда имеет смысл двигаться дальше без platform drift.
 
 ---
 
 ## 2. Текущее состояние ядра
 
-**v0 HTTP kernel стабилизирован.** Baseline: `78 tests / 217 assertions`. Все QA-инструменты зелёные.
+**Framework core стабилизирован как shared bootstrap + two runtime axes.**
 
-```
+Baseline:
+
+- `composer qa` — green
+- `composer test` — green
+- `98 tests / 290 assertions`
+
+Система сейчас выглядит так:
+
+```text
+HTTP
 public/index.php
-  └─ bootstrap/app.php
-       └─ ApplicationFactory::createRuntime()
-            ├─ EnvironmentLoader (stateless)
-            ├─ ConfigLoader (scope-isolated require)
-            └─ Bootstrapper → [register all] → [build container] → [boot bootable]
-                 ├─ CoreServicesProvider         (register only)
-                 ├─ ConfiguredServicesProvider   (register only)
-                 ├─ RoutingServiceProvider       (register + boot)
-                 └─ HttpKernelProvider           (register + boot)
+  -> bootstrap/app.php
+  -> ApplicationFactory::createRuntime()
+  -> Bootstrapper
+  -> HttpRuntime
+
+CLI
+bin/console
+  -> bootstrap/console.php
+  -> ConsoleApplicationFactory::createRuntime()
+  -> Bootstrapper
+  -> ConsoleRuntime
+
+Shared bootstrap
+EnvironmentLoader
+  -> ConfigLoader
+  -> Bootstrapper
+     -> [register all providers]
+     -> [build container]
+     -> [boot bootable providers]
 ```
 
-**Что работает:**
+### Что уже работает
 
-- PSR-7/PSR-15/PSR-11 compliance
-- Static O(1) + dynamic regex routing
-- HEAD → GET fallback в router
-- Transport-level body suppression для HEAD (`emitBody: false`)
-- Two-phase bootstrap: `register → build → boot`
-- `ServiceProviderInterface` + `BootableProviderInterface` — раздельные контракты
-- `RequiresContainer` flag вычислен один раз при регистрации, нет reflection в runtime
-- `EnvironmentLoader` без static state
-- Scope isolation через IIFE в `ConfigLoader` и `RoutesFileLoader`
-- Multi-file config с deterministic merge и environment overlays
-- `ErrorHandlingMiddleware` как outer boundary для всего HTTP path
-- Container: bindings, singletons, aliases, circular dependency detection, alias cycle detection
+- PSR-7 / PSR-15 / PSR-11 boundaries
+- stateless environment bootstrap
+- multi-file config + environment overlays
+- explicit container без runtime reflection в factory hot path
+- HTTP routing:
+  - static and dynamic routes
+  - named routes
+  - URL generation
+  - route groups
+  - `HEAD -> GET` fallback
+  - correct `Allow` header semantics для `405`
+- HTTP error boundary с controlled `HttpException` hierarchy
+- CLI command runtime:
+  - explicit command registration
+  - deterministic argv parsing
+  - container-based class commands
+  - debug / non-debug console error boundary
 
 ---
 
 ## 3. Закрытые задачи
 
-### 3.1 Рефакторинг ApplicationFactory (God Object → Thin Orchestrator)
+### 3.1 ApplicationFactory: God Object -> thin orchestrator
 
-Было: ~310 строк, 11 private static методов, всё в одном месте.
-Стало: ~50 строк, два метода, делегирует в `Bootstrapper`.
+Ручная сборка runtime graph убрана из `ApplicationFactory`.
 
-### 3.2 Декомпозиция bootstrap в providers
+### 3.2 Internal bootstrap providers
 
-`CoreServicesProvider`, `ConfiguredServicesProvider`, `RoutingServiceProvider`, `HttpKernelProvider`.
+Введён fixed internal lifecycle:
 
-### 3.3 Раздельные интерфейсы lifecycle
+- `ServiceProviderInterface`
+- `BootableProviderInterface`
+- `Bootstrapper`
 
-`ServiceProviderInterface` (только `register`) + `BootableProviderInterface` (только `boot`).
-Устранены пустые `boot()` с `unset($context)`.
+### 3.3 Reflection убрана из container hot path
 
-### 3.4 Reflection из hot-path контейнера
+Factory invocation mode предвычисляется при регистрации.
 
-`ServiceDefinition::requiresContainer` вычисляется в `ContainerBuilder::factoryRequiresContainer()` один раз.
-`Container::invokeFactory()` больше не создаёт `ReflectionFunction` в runtime.
+### 3.4 HEAD correctness
 
-### 3.5 HEAD semantics
+- router поддерживает `HEAD -> GET`
+- `405 Allow` включает `HEAD`, если path поддерживает `GET`
+- response emitter умеет suppress body на transport boundary
+- полный flow покрыт integration tests
 
-- Router: explicit HEAD route имеет приоритет; fallback HEAD → GET для static и dynamic routes.
-- `405 Method Not Allowed`: `Allow` включает `HEAD`, если путь поддерживает `GET`.
-- `ResponseEmitter::emit(response, emitBody: bool)` — transport-level policy.
-- `public/index.php`: `emitBody: strcasecmp($request->getMethod(), 'HEAD') !== 0`.
-- Покрыто тестами на уровне Router, RouteDispatcher, ResponseEmitter и ApplicationFactory.
+### 3.5 EnvironmentLoader stateless
 
-### 3.6 EnvironmentLoader stateless
+Убран скрытый process-level path cache.
 
-Убран `static $loadedPaths`. Повторная загрузка из того же basePath работает корректно.
+### 3.6 Scope-isolated `require`
 
-### 3.7 Scope isolation для require
+`ConfigLoader`, `RoutesFileLoader` и `CommandsFileLoader` изолируют scope app files.
 
-`ConfigLoader::requireFile()` и `RoutesFileLoader::requireFile()` используют IIFE, чтобы файл не получал доступ к локальным переменным loader'а.
+### 3.7 Multi-file config
 
-### 3.8 $config через контейнер, не через closure capture
+`config/*.php` детерминированно мерджатся, затем может накладываться environment overlay.
 
-`CoreServicesProvider` достаёт `Config` через `ContainerAccessor::get()`, а не через `use ($config)`.
+### 3.8 Routing capability layer
 
-### 3.9 Test hardening
+Реализованы:
 
-Покрыты изолированными тестами:
-- `Route`, `Router`, `RouteCollector`
-- `Container`, `ContainerBuilder`
-- `HandlerResolver`, `MiddlewareResolver`, `MiddlewareDispatcher`
-- `RouteDispatcher`, `ErrorResponseFactory`, `ResponseEmitter`
-- `Bootstrapper`, `GlobalMiddlewareRegistry`, `RouteRegistry`
-- `ProviderIntegration` (lifecycle scenarios)
-- `Env`, `Config`, `ConfigLoader`, `EnvironmentLoader`
-- `ApplicationFactory` (end-to-end)
+- named routes
+- URL generation
+- route groups
 
-### 3.10 Path normalization contract
+### 3.9 Controlled HTTP failures
 
-- `Router::match()` нормализует входной path один раз на boundary routing layer.
-- `Route` больше не выполняет повторную defensive normalization в matching helpers.
-- Matching seam сделан явным через методы:
-  - `matchesNormalizedPath()`
-  - `extractParametersFromNormalizedPath()`
-- Это переводит нормализацию из "размытой коллективной ответственности" в
-  "одну явную обязанность Router".
+`HttpException` hierarchy даёт честный путь к `4xx/405` без обхода error boundary.
 
-### 3.11 ServiceDefinition accessors
+### 3.10 Console kernel v0
 
-- `ServiceDefinition` больше не экспонирует runtime data через public properties.
-- Container читает definition через явные accessor-методы:
-  - `factory()`
-  - `isShared()`
-  - `requiresContainer()`
-- Это не меняет semantics resolution, но выравнивает container internals с общим стилем ядра:
-  immutable state остаётся закрытым, а доступ к нему проходит через именованный контракт.
+Реализован второй runtime axis:
 
-### 3.12 Named routes and URL generation
+- `ConsoleApplicationFactory`
+- `ConsoleRuntime`
+- `CommandCollector` / `CommandRegistry`
+- `ArgvInputFactory`
+- `ConsoleApplication`
+- `ConsoleErrorRenderer`
+- `bin/console`
+- `commands/console.php`
 
-- `RouteCollector` теперь возвращает optional fluent `RouteBuilder`, через который route можно именовать:
-  - `$routes->get('/users/{id}', Handler::class)->name('users.show');`
-- `Route` хранит optional route name и умеет генерировать path из route parameters.
-- `Router` индексирует named routes и предоставляет `url(name, parameters)`.
-- Duplicate route names считаются bootstrap-time invariant violation и ломают сборку router'а fail-fast.
-
-### 3.13 Route groups
-
-- `RouteCollector::group()` добавляет nested prefix и inherited middleware без новой runtime subsystem.
-- Group state живёт только на registration layer и восстанавливается через `try/finally`, поэтому группы не протекают в соседние registrations.
-- Nested groups композиционно собирают:
-  - path prefix;
-  - middleware order от outer group к inner group и затем к route-level middleware.
-- Capability покрыта на двух уровнях:
-  - `RouteCollectorTest` — prefix/middleware inheritance и state restoration;
-  - `ApplicationFactoryTest` — реальный HTTP flow с group middleware.
-
-### 3.14 HttpException hierarchy
-
-- В `Framework\Http\Exception` добавлена controlled HTTP exception hierarchy:
-  - `NotFoundException`
-  - `ForbiddenException`
-  - `UnprocessableEntityException`
-  - `MethodNotAllowedException`
-- `ErrorHandlingMiddleware` теперь различает:
-  - explicit `HttpException` -> `ErrorResponseFactory::fromHttpException()`
-  - неожиданный `Throwable` -> `internalServerError()`
-- Это открывает controlled `4xx/405` semantics из бизнес-логики без обхода router/error boundary.
-
-### 3.15 Multi-file config
-
-- `ConfigLoader` теперь принимает не только один файл, но и `config/` directory.
-- Базовая конфигурация собирается из top-level `config/*.php` в детерминированно отсортированном порядке.
-- Merge strategy явно зафиксирована:
-  - associative arrays мерджатся рекурсивно;
-  - list arrays не склеиваются, а заменяются override-значением целиком.
-- После базовой сборки может применяться environment-specific overlay из `config/environments/<app.env>.php`.
-- Текущий skeleton уже dogfooding'ит эту модель через:
-  - `config/app.php`
-  - `config/http.php`
-  - `config/container.php`
-- Capability покрыта isolated config tests и не меняет public bootstrap contract: `ApplicationFactory` по-прежнему собирает runtime только из `basePath`.
+Ключевой результат: framework больше не HTTP-only, но при этом не превратился в plugin platform.
 
 ---
 
 ## 4. Активные точки давления
 
-### P3. `ReflectionClass::newInstance()` в ContainerBuilder
+### P3. `ReflectionClass::newInstance()` в `ContainerBuilder`
 
-**Где:** [ContainerBuilder.php](src/Container/ContainerBuilder.php) — метод `instantiateClass()`
+**Где:** [`src/Container/ContainerBuilder.php`](/C:/OSPanel/home/framework.ru/src/Container/ContainerBuilder.php)
 
-```php
-return $reflection->newInstance(); // можно заменить на new $class()
-```
+После проверки конструктора локально кажется, что `new $class()` был бы проще.
+Но текущее toolchain-ограничение остаётся прежним:
 
-После проверки "конструктор без required аргументов" локально кажется, что
-`new $class()` должен быть проще. Но в текущем toolchain это решение не проходит
-без деградации analyzability:
-- Psalm не принимает такой вызов без дополнительного suppression/workaround;
-- для этого проекта suppression ради косметического упрощения хуже, чем текущий reflection tail.
+- suppression-free вариант пока не найден;
+- Psalm начинает терять analyzability;
+- для этого проекта это хуже, чем маленький reflection tail.
 
-**Текущий вывод:** оставить пункт открытым как accepted low-priority debt, пока не появится
-suppression-free реализация, которая не ухудшает статическую проверяемость.
+**Статус:** accepted low-priority debt.
 
-**Серьёзность:** низкая (simplicity).
+**Серьёзность:** низкая.
 
 ---
 
-### P6. `BootstrapContext` возвращает конкретный `Container`
+### P6. `BootstrapContext` возвращает concrete `Container`
 
-**Где:** [BootstrapContext.php](src/Foundation/Bootstrap/BootstrapContext.php)
+**Где:** [`src/Foundation/Bootstrap/BootstrapContext.php`](/C:/OSPanel/home/framework.ru/src/Foundation/Bootstrap/BootstrapContext.php)
 
-`container(): Container` вместо `ContainerInterface`. Все провайдеры привязаны
-к конкретной реализации. При желании декорировать или подменить контейнер
-в boot-фазе потребует изменения сигнатуры.
+`container(): Container` жёстче, чем `ContainerInterface`.
+Пока это не operational problem, но это minor extensibility mismatch.
 
-**Серьёзность:** низкая (extensibility).
+**Статус:** low-priority design debt.
+
+**Серьёзность:** низкая.
+
+---
+
+### P7. Checkpoint после split runtime axes
+
+После введения CLI path система стала сильнее, но появился новый риск:
+
+- shared bootstrap может начать размываться;
+- provider graph для HTTP и CLI может начать дублироваться неструктурно;
+- config model может тихо расползтись в два почти независимых мира.
+
+Это не дефект текущего кода. Это системный checkpoint, который нужно пройти до следующей крупной capability.
+
+Что надо проверить:
+
+- не дублируются ли shared registrations между `HttpCoreServicesProvider` и `ConsoleKernelProvider`;
+- не начал ли bootstrap слой превращаться в скрытый второй framework внутри framework;
+- остаётся ли app model простой:
+  - `config/`
+  - `routes/web.php`
+  - `commands/console.php`
+
+**Статус:** следующий обязательный архитектурный шаг.
+
+**Серьёзность:** средняя.
 
 ---
 
 ## 5. Что сознательно не входит в текущий plan
 
 Ниже перечислены отсутствующие компоненты, которые не считаются дефектами ядра.
-Это следующий архитектурный горизонт.
 
-- **public provider layer** — app-level `config/providers.php` стиль Laravel/Symfony
-- **autowiring** — контейнер намеренно explicit-only; analyzability важнее удобства
-- **console kernel** — отдельный `ConsoleRuntime`
-- **PSR-14 events**
-- **attribute routing** (`#[Route('/path')]`)
-- **named middleware** / middleware aliases
-- **auth/session/CSRF/ORM/queue/scheduler**
-
----
-
-## 6. План дальнейшего развития
-
-### Фаза A. Закрыта: HEAD correctness и transport coverage
-
-- `Allow` для `405` теперь включает `HEAD`, если путь поддерживает `GET`.
-- Добавлен integration-тест полного пути `HEAD /route → application → emitter`.
+- public provider layer
+- autowiring by default
+- PSR-14 events
+- attribute routing
+- named middleware aliases
+- auth/session/CSRF
+- ORM / queue / scheduler
+- advanced console UX:
+  - short options
+  - interactive prompts
+  - ANSI styling
+  - signature DSL
+  - autodiscovery
 
 ---
 
-### Фаза B. Quality fixes (без изменения контрактов)
+## 6. Следующий план развития
 
-**B1. Пересмотреть P3 только при suppression-free решении**
+### Фаза G. Закрыта: Console kernel v0
 
-Пункт не должен продвигаться ценой `@psalm-suppress` ради косметического выигрыша.
-Возвращаться к нему имеет смысл только если появится чистая реализация без потери analyzability.
+Реализован минимальный CLI runtime без platform explosion.
 
----
+Что важно:
 
-### Фаза C. Закрыта: Named Routes + URL Generation
-
-- Добавлен fluent `RouteBuilder` для optional route naming.
-- `Router::url()` генерирует path по имени маршрута и route parameters.
-- Покрыты route naming, url generation, duplicate names и missing parameters.
+- CLI делит bootstrap, config и container с HTTP;
+- CLI не делит HTTP-specific runtime graph;
+- команды регистрируются явно;
+- framework не навязывает magic command model.
 
 ---
 
-### Фаза D. Закрыта: Route Groups
+### Следующий обязательный шаг: архитектурный checkpoint
 
-- `RouteCollector::group()` поддерживает nested prefix inheritance.
-- Route groups наследуют middleware в порядке outer → inner → route.
-- Пустая группа не оставляет residual state в collector.
+До следующей capability нужно ответить на три вопроса:
 
----
+1. Shared bootstrap действительно остался shared, или начался drift между HTTP и CLI?
+2. Не появился ли лишний слой сложности в provider lifecycle?
+3. Остаётся ли app model простой и реконструируемой?
 
-### Фаза E. Закрыта: HttpException Hierarchy
-
-- Бизнес-код может выбрасывать controlled HTTP-исключения, не обходя существующий error boundary.
-- `ErrorResponseFactory` умеет строить response из `HttpException`.
-- `ErrorHandlingMiddleware` различает client-facing HTTP failures и неожиданные ошибки исполнения.
+Это не теоретический ритуал. После split runtime axes без такого checkpoint очень легко пойти в feature accumulation и потерять управляемость core.
 
 ---
 
-### Фаза F. Закрыта: Multi-File Config
+### После checkpoint: наиболее рациональный следующий горизонт
 
-- `ConfigLoader` умеет собирать конфигурацию из `config/` directory.
-- Top-level `.php` files мерджатся детерминированно.
-- `config/environments/<app.env>.php` может накладываться поверх базовой сборки.
-- Модель уже используется самим skeleton'ом проекта.
+Если checkpoint зелёный, следующий сильный кандидат — не Events и не Auth stack, а read-only introspection commands поверх уже существующего CLI axis:
+
+- `route:list`
+- `config:show`
+- возможно `container:debug`
+
+Почему это сильнее, чем новый subsystem:
+
+- reutilizes уже собранный console kernel;
+- даёт практическую ценность без новых внешних зависимостей;
+- усиливает observability и учебную реконструируемость системы;
+- не размывает архитектуру новой execution axis.
 
 ---
 
 ## 7. Приоритеты
 
-```
-Немедленно:   нет blocking cleanup после закрытия `ServiceDefinition` consistency fix
-Следующая:    архитектурный checkpoint после роста capability surface и выбор следующего горизонта
-Опционально:  revisit P3, только если найдётся suppression-free реализация
-Потом:        выбрать следующую capability только после явной фиксации системной цели
-Горизонт:     Console kernel, Events, Auth stack
+```text
+Немедленно:   пройти архитектурный checkpoint после split runtime axes
+Опционально:  revisit P3 только при suppression-free решении
+Опционально:  revisit P6 только если появится реальная потребность в container abstraction на boot phase
+Потом:        выбрать следующую capability только после checkpoint
+Горизонт:     observability-oriented console commands, а не platform-heavy subsystems
 ```
 
 ---
 
 ## 8. Принципы, которые нельзя нарушать
 
-1. **Каждое изменение проходит полный QA** (lint + cs + phpstan + psalm + tests).
-2. **Новая capability — только после стабилизации предыдущей.**
-3. **Measured debt, не optimization by suspicion** — reflection, allocations, bootstrap overhead
-   трогаем только при воспроизводимом workload.
-4. **Internal bootstrap providers не становятся public extension API** без отдельного решения.
-5. **Три слоя в синхроне:** код + `docs/framework-architecture.md` + этот файл.
+1. Каждое существенное изменение проходит полный QA.
+2. Новая capability добавляется только после стабилизации предыдущей.
+3. Measured debt важнее optimization by suspicion.
+4. Internal bootstrap providers не становятся public extension API без отдельного решения.
+5. Документация, код и execution log должны оставаться синхронизированы.
