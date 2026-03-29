@@ -6,7 +6,7 @@ namespace Framework\Foundation\Bootstrap;
 
 use Framework\Config\Config;
 use Framework\Config\InvalidConfigurationException;
-use Framework\Routing\RouteCollection;
+use Framework\Routing\RouteIndex;
 use Framework\Routing\RouteCollector;
 use Framework\Support\IsolatedFileRequirer;
 
@@ -15,7 +15,18 @@ use Framework\Support\IsolatedFileRequirer;
  */
 final class RoutesFileLoader
 {
-    public function load(string $basePath, Config $config): RouteCollection
+    public function load(string $basePath, Config $config): RouteIndex
+    {
+        $cachePaths = new FrameworkCachePaths($basePath);
+
+        if (is_file($cachePaths->routesFile())) {
+            return $this->loadCachedIndex($cachePaths->routesFile());
+        }
+
+        return $this->loadSource($basePath, $config);
+    }
+
+    public function loadSource(string $basePath, Config $config): RouteIndex
     {
         $routesPath = ProjectFileResolver::resolveConfiguredFile(
             $config,
@@ -33,9 +44,58 @@ final class RoutesFileLoader
             ));
         }
 
-        $collector = new RouteCollector(new RouteCollection());
+        $collector = new RouteCollector(new \Framework\Routing\RouteCollection());
         $registrar($collector);
 
-        return $collector->collection();
+        return RouteIndex::fromRouteCollection($collector->collection());
+    }
+
+    private function loadCachedIndex(string $path): RouteIndex
+    {
+        $index = IsolatedFileRequirer::require($path);
+
+        if (!is_array($index)) {
+            throw new InvalidConfigurationException(sprintf(
+                'Routes cache file [%s] must return an array.',
+                $path
+            ));
+        }
+
+        try {
+            /** @var array{
+             *     routes: list<array{
+             *         methods: list<string>,
+             *         path: string,
+             *         handler: string,
+             *         middleware: list<string>,
+             *         name: string|null,
+             *         compiled_path: array{
+             *             path: string,
+             *             matching_regex: non-empty-string,
+             *             parameters: list<array{
+             *                 name: string,
+             *                 placeholder: string,
+             *                 constraint: string|null,
+             *                 validationRegex: non-empty-string|null
+             *             }>,
+             *             static: bool,
+             *             segment_count: int,
+             *             first_literal_segment: string|null
+             *         }
+             *     }>,
+             *     static_routes: array<string, array<string, int>>,
+             *     dynamic_literal_buckets: array<int, array<string, list<int>>>,
+             *     dynamic_wildcard_buckets: array<int, list<int>>,
+             *     named_routes: array<string, int>
+             * } $index
+             */
+            return RouteIndex::fromExport($index);
+        } catch (\Throwable $throwable) {
+            throw new InvalidConfigurationException(sprintf(
+                'Routes cache file [%s] is invalid: %s',
+                $path,
+                $throwable->getMessage()
+            ), 0, $throwable);
+        }
     }
 }

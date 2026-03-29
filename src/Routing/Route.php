@@ -27,6 +27,9 @@ final readonly class Route
     /** @var list<string> */
     private array $methods;
 
+    /** @var array<string, true> */
+    private array $methodLookup;
+
     private string $path;
 
     private CompiledRoutePath $compiledPath;
@@ -36,6 +39,8 @@ final readonly class Route
     private ?string $name;
 
     private bool $static;
+
+    private bool $allowsHeadFallback;
 
     /**
      * @param list<string> $methods
@@ -47,6 +52,7 @@ final readonly class Route
         callable|string $handler,
         private array $middleware = [],
         ?string $name = null,
+        ?CompiledRoutePath $compiledPath = null,
     ) {
         $normalizedMethods = array_values(array_unique(array_map(
             static fn (string $method): string => strtoupper($method),
@@ -58,11 +64,13 @@ final readonly class Route
         }
 
         $this->methods = $normalizedMethods;
+        $this->methodLookup = array_fill_keys($normalizedMethods, true);
         $this->path = self::normalizePath($path);
-        $this->compiledPath = CompiledRoutePath::fromNormalizedPath($this->path);
+        $this->compiledPath = $compiledPath ?? CompiledRoutePath::fromNormalizedPath($this->path);
         $this->handler = is_string($handler) ? $handler : Closure::fromCallable($handler);
         $this->name = $name !== null ? self::normalizeName($name) : null;
         $this->static = $this->compiledPath->isStatic();
+        $this->allowsHeadFallback = in_array('GET', $normalizedMethods, true);
     }
 
     /**
@@ -122,6 +130,26 @@ final readonly class Route
         return $this->static;
     }
 
+    public function segmentCount(): int
+    {
+        return $this->compiledPath->segmentCount();
+    }
+
+    public function firstLiteralSegment(): ?string
+    {
+        return $this->compiledPath->firstLiteralSegment();
+    }
+
+    public function supportsMethod(string $normalizedMethod): bool
+    {
+        return isset($this->methodLookup[$normalizedMethod]);
+    }
+
+    public function supportsHeadFallbackFor(string $normalizedMethod): bool
+    {
+        return $normalizedMethod === 'HEAD' && $this->allowsHeadFallback;
+    }
+
     /**
      * Returns a new route instance with a name used for URL generation.
      */
@@ -136,6 +164,14 @@ final readonly class Route
     public function matchesNormalizedPath(string $path): bool
     {
         return $this->compiledPath->matchesNormalizedPath($path);
+    }
+
+    /**
+     * @return array<string, string>|null
+     */
+    public function matchNormalizedPath(string $path): ?array
+    {
+        return $this->compiledPath->matchNormalizedPath($path);
     }
 
     /**
@@ -158,6 +194,97 @@ final readonly class Route
     public function generatePath(array $parameters = []): string
     {
         return $this->compiledPath->generatePath($parameters);
+    }
+
+    /**
+     * @param array{
+     *     methods: list<string>,
+     *     path: string,
+     *     handler: string,
+     *     middleware: list<string>,
+     *     name: string|null,
+     *     compiled_path: array{
+     *         path: string,
+     *         matching_regex: non-empty-string,
+     *         parameters: list<array{
+     *             name: string,
+     *             placeholder: string,
+     *             constraint: string|null,
+     *             validationRegex: non-empty-string|null
+     *         }>,
+     *         static: bool,
+     *         segment_count: int,
+     *         first_literal_segment: string|null
+     *     }
+     * } $data
+     */
+    public static function fromExport(array $data): self
+    {
+        /** @var list<class-string<MiddlewareInterface>> $middleware */
+        $middleware = $data['middleware'];
+
+        return new self(
+            $data['methods'],
+            $data['path'],
+            $data['handler'],
+            $middleware,
+            $data['name'],
+            CompiledRoutePath::fromExport($data['compiled_path'])
+        );
+    }
+
+    /**
+     * @return array{
+     *     methods: list<string>,
+     *     path: string,
+     *     handler: string,
+     *     middleware: list<string>,
+     *     name: string|null,
+     *     compiled_path: array{
+     *         path: string,
+     *         matching_regex: non-empty-string,
+     *         parameters: list<array{
+     *             name: string,
+     *             placeholder: string,
+     *             constraint: string|null,
+     *             validationRegex: non-empty-string|null
+     *         }>,
+     *         static: bool,
+     *         segment_count: int,
+     *         first_literal_segment: string|null
+     *     }
+     * }
+     */
+    public function export(): array
+    {
+        if (!is_string($this->handler)) {
+            throw new InvalidArgumentException(sprintf(
+                'Route [%s] cannot be exported because its handler is not a class-string.',
+                $this->path
+            ));
+        }
+
+        $middleware = [];
+
+        foreach ($this->middleware as $definition) {
+            if (!is_string($definition)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Route [%s] cannot be exported because it contains instance-based middleware.',
+                    $this->path
+                ));
+            }
+
+            $middleware[] = $definition;
+        }
+
+        return [
+            'methods' => $this->methods,
+            'path' => $this->path,
+            'handler' => $this->handler,
+            'middleware' => $middleware,
+            'name' => $this->name,
+            'compiled_path' => $this->compiledPath->export(),
+        ];
     }
 
     private static function normalizeName(string $name): string

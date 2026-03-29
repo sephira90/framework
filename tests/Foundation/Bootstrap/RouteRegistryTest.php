@@ -6,6 +6,7 @@ namespace Framework\Tests\Foundation\Bootstrap;
 
 use Framework\Foundation\Bootstrap\BootstrapStateException;
 use Framework\Foundation\Bootstrap\RouteRegistry;
+use Framework\Routing\RouteIndex;
 use Framework\Routing\RouteCollection;
 use Framework\Tests\Support\FrameworkTestCase;
 
@@ -27,13 +28,13 @@ final class RouteRegistryTest extends FrameworkTestCase
     public function testRouteRegistryRejectsRepeatedInitialization(): void
     {
         $registry = new RouteRegistry();
-        $registry->initialize(new RouteCollection());
+        $registry->initialize(RouteIndex::fromRouteCollection(new RouteCollection()));
 
         self::assertTrue($registry->isInitialized());
 
         $this->expectException(BootstrapStateException::class);
         $this->expectExceptionMessage('Route registry has already been initialized.');
 
-        $registry->initialize(new RouteCollection());
+        $registry->initialize(RouteIndex::fromRouteCollection(new RouteCollection()));
     }
 }

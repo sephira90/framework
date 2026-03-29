@@ -4,30 +4,30 @@ declare(strict_types=1);
 
 namespace Framework\Foundation\Bootstrap;
 
-use Framework\Routing\RouteCollection;
+use Framework\Routing\RouteIndex;
 
 /**
  * Single-assignment holder for routes loaded during bootstrap.
  */
 final class RouteRegistry
 {
-    /** @var SingleAssignmentHolder<RouteCollection> */
+    /** @var SingleAssignmentHolder<RouteIndex> */
     private SingleAssignmentHolder $routes;
 
     public function __construct()
     {
-        /** @var SingleAssignmentHolder<RouteCollection> $routes */
+        /** @var SingleAssignmentHolder<RouteIndex> $routes */
         $routes = new SingleAssignmentHolder('Route registry');
 
         $this->routes = $routes;
     }
 
-    public function initialize(RouteCollection $routes): void
+    public function initialize(RouteIndex $routes): void
     {
         $this->routes->initialize($routes);
     }
 
-    public function routes(): RouteCollection
+    public function routes(): RouteIndex
     {
         $routes = $this->routes->get();
 

@@ -177,6 +177,27 @@ final class RouterTest extends FrameworkTestCase
         self::assertSame('head-status-handler', $match->route()->handler());
     }
 
+    public function testRouterPreservesDynamicRegistrationOrderAcrossLiteralAndWildcardBuckets(): void
+    {
+        $wildcardFirst = new RouteCollector(new RouteCollection());
+        $wildcardFirst->get('/{section}/{id}', 'wildcard-handler');
+        $wildcardFirst->get('/users/{id}', 'literal-handler');
+
+        $wildcardFirstMatch = (new Router($wildcardFirst->collection()))->match('GET', '/users/42');
+
+        self::assertSame(RouteMatchStatus::Found, $wildcardFirstMatch->status());
+        self::assertSame('wildcard-handler', $wildcardFirstMatch->route()->handler());
+
+        $literalFirst = new RouteCollector(new RouteCollection());
+        $literalFirst->get('/users/{id}', 'literal-handler');
+        $literalFirst->get('/{section}/{id}', 'wildcard-handler');
+
+        $literalFirstMatch = (new Router($literalFirst->collection()))->match('GET', '/users/42');
+
+        self::assertSame(RouteMatchStatus::Found, $literalFirstMatch->status());
+        self::assertSame('literal-handler', $literalFirstMatch->route()->handler());
+    }
+
     public function testRouteCollectorSupportsAllConvenienceMethods(): void
     {
         $collector = new RouteCollector(new RouteCollection());

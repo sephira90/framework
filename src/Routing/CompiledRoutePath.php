@@ -41,6 +41,8 @@ final readonly class CompiledRoutePath
         private string $matchingRegex,
         array $parameters,
         private bool $static,
+        private int $segmentCount,
+        private ?string $firstLiteralSegment,
     ) {
         $this->parameters = $parameters;
     }
@@ -48,12 +50,13 @@ final readonly class CompiledRoutePath
     public static function fromNormalizedPath(string $path): self
     {
         if ($path === '/') {
-            return new self('/', '#^/$#', [], true);
+            return new self('/', '#^/$#', [], true, 0, null);
         }
 
         $segments = explode('/', trim($path, '/'));
         $parameters = [];
         $patternSegments = [];
+        $firstLiteralSegment = null;
         /** @var array<string, true> $seenParameters */
         $seenParameters = [];
 
@@ -62,6 +65,11 @@ final readonly class CompiledRoutePath
 
             if ($parameter === null) {
                 $patternSegments[] = preg_quote($segment, '#');
+
+                if ($firstLiteralSegment === null) {
+                    $firstLiteralSegment = $segment;
+                }
+
                 continue;
             }
 
@@ -78,14 +86,50 @@ final readonly class CompiledRoutePath
         }
 
         if ($parameters === []) {
-            return new self($path, '#^' . preg_quote($path, '#') . '$#', [], true);
+            return new self(
+                $path,
+                '#^' . preg_quote($path, '#') . '$#',
+                [],
+                true,
+                count($segments),
+                $firstLiteralSegment
+            );
         }
 
         return new self(
             $path,
             '#^/' . implode('/', $patternSegments) . '$#',
             $parameters,
-            false
+            false,
+            count($segments),
+            $firstLiteralSegment
+        );
+    }
+
+    /**
+     * @param array{
+     *     path: string,
+     *     matching_regex: non-empty-string,
+     *     parameters: list<array{
+     *         name: string,
+     *         placeholder: string,
+     *         constraint: string|null,
+     *         validationRegex: non-empty-string|null
+     *     }>,
+     *     static: bool,
+     *     segment_count: int,
+     *     first_literal_segment: string|null
+     * } $data
+     */
+    public static function fromExport(array $data): self
+    {
+        return new self(
+            $data['path'],
+            $data['matching_regex'],
+            $data['parameters'],
+            $data['static'],
+            $data['segment_count'],
+            $data['first_literal_segment']
         );
     }
 
@@ -94,13 +138,31 @@ final readonly class CompiledRoutePath
         return $this->static;
     }
 
-    public function matchesNormalizedPath(string $path): bool
+    public function segmentCount(): int
+    {
+        return $this->segmentCount;
+    }
+
+    public function firstLiteralSegment(): ?string
+    {
+        return $this->firstLiteralSegment;
+    }
+
+    /**
+     * @return array<string, string>|null
+     */
+    public function matchNormalizedPath(string $path): ?array
     {
         if ($this->static) {
-            return $this->path === $path;
+            return $this->path === $path ? [] : null;
         }
 
-        return $this->extractDynamicParameters($path) !== null;
+        return $this->extractDynamicParameters($path);
+    }
+
+    public function matchesNormalizedPath(string $path): bool
+    {
+        return $this->matchNormalizedPath($path) !== null;
     }
 
     /**
@@ -108,11 +170,7 @@ final readonly class CompiledRoutePath
      */
     public function extractParametersFromNormalizedPath(string $path): array
     {
-        if ($this->static) {
-            return [];
-        }
-
-        return $this->extractDynamicParameters($path) ?? [];
+        return $this->matchNormalizedPath($path) ?? [];
     }
 
     /**
@@ -214,6 +272,33 @@ final readonly class CompiledRoutePath
         }
 
         throw UrlGenerationException::unexpectedParameters($this->path, $unexpectedParameters);
+    }
+
+    /**
+     * @return array{
+     *     path: string,
+     *     matching_regex: non-empty-string,
+     *     parameters: list<array{
+     *         name: string,
+     *         placeholder: string,
+     *         constraint: string|null,
+     *         validationRegex: non-empty-string|null
+     *     }>,
+     *     static: bool,
+     *     segment_count: int,
+     *     first_literal_segment: string|null
+     * }
+     */
+    public function export(): array
+    {
+        return [
+            'path' => $this->path,
+            'matching_regex' => $this->matchingRegex,
+            'parameters' => $this->parameters,
+            'static' => $this->static,
+            'segment_count' => $this->segmentCount,
+            'first_literal_segment' => $this->firstLiteralSegment,
+        ];
     }
 
     /**
