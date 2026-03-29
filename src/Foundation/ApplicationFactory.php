@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace Framework\Foundation;
 
-use Framework\Config\ConfigLoader;
-use Framework\Config\EnvironmentLoader;
+use Framework\Config\ProjectConfigLoader;
 use Framework\Foundation\Bootstrap\Bootstrapper;
 use Framework\Foundation\Bootstrap\ContainerAccessor;
 use Framework\Foundation\Bootstrap\Provider\ConfiguredServicesProvider;
@@ -32,9 +31,7 @@ final class ApplicationFactory
      */
     public static function createRuntime(string $basePath): HttpRuntime
     {
-        (new EnvironmentLoader())->load($basePath);
-
-        $config = ConfigLoader::load($basePath . DIRECTORY_SEPARATOR . 'config');
+        $config = (new ProjectConfigLoader())->loadRuntime($basePath);
         $container = self::bootstrapper()->bootstrap($basePath, $config);
 
         return ContainerAccessor::get($container, HttpRuntime::class);
