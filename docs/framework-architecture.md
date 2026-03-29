@@ -82,6 +82,8 @@
 
 - `Config` — immutable repository поверх config array
 - `ConfigLoader` — загружает `config/` directory и детерминированно мерджит config slices
+- `ProjectConfigLoader` — решает, читать ли config из source files или из explicit cache snapshot
+- `ConfigCacheCompiler` — строит exportable config snapshot для `var/cache/framework/config.php`
 - `Env` — читает переменные окружения
 - `EnvironmentLoader` — поднимает `.env` до сборки runtime
 - `InvalidConfigurationException` — сигнал о плохой конфигурации
@@ -104,7 +106,9 @@
 - `RouteCollection` — ordered collection маршрутов
 - `RouteCollector` — registration API
 - `RouteBuilder` — fluent metadata seam
-- `Router` — matching и URL generation
+- `RouteIndex` — precompiled index для matching hot path и route cache
+- `RouteCacheCompiler` — строит exportable route index для `var/cache/framework/routes.php`
+- `Router` — thin facade поверх `RouteIndex` для matching и URL generation
 - `RouteMatch` / `RouteMatchStatus` — typed result matching
 - `RouteAttributes` — request attribute names для matched route и params
 
@@ -158,6 +162,7 @@
 - `BootstrapBuilder` — pre-container context
 - `BootstrapContext` — post-container context c `ContainerInterface`, а не concrete container
 - `ContainerAccessor` — typed accessor поверх `ContainerInterface::get()`
+- `FrameworkCachePaths` / `CacheFileWriter` — explicit cache path и cache persistence helpers
 - `RouteRegistry` / `GlobalMiddlewareRegistry` / `CommandRegistry` — dedicated boot state
 - `RoutesFileLoader` / `CommandsFileLoader` — scope-isolated project-bound app registration loaders
 - `Provider\\*` — fixed internal providers
@@ -186,7 +191,7 @@
 
 ### Шаг 1. Environment bootstrap
 
-Обе factory сначала создают `EnvironmentLoader` и вызывают `load(basePath)`.
+Обе factory делегируют чтение config `ProjectConfigLoader`, а он поднимает `.env` до source-config loading и до проверки cache snapshot.
 
 Инвариант:
 
@@ -196,15 +201,17 @@
 
 ### Шаг 2. Config assembly
 
-Обе factory вызывают `ConfigLoader::load(basePath . '/config')`.
+Обе factory вызывают `ProjectConfigLoader`.
 
 Инвариант:
 
+- если существует `var/cache/framework/config.php`, runtime берёт config snapshot оттуда и не пересобирает его на лету;
 - top-level `config/*.php` мерджатся в детерминированном отсортированном порядке;
 - associative arrays мерджатся рекурсивно;
 - list arrays заменяются целиком;
 - optional overlay `config/environments/<app.env>.php` применяется после базовой сборки;
-- `require` изолирован, поэтому config file не получает доступ к локальному scope loader'а.
+- `require` изолирован, поэтому config file не получает доступ к локальному scope loader'а;
+- config cache остаётся explicit snapshot: он может устареть относительно source files и `.env`, пока не будет явно перестроен.
 
 ### Шаг 3. Fixed provider order
 
@@ -230,7 +237,8 @@
 - provider order hardcoded;
 - providers internal-only;
 - приложение не конфигурирует provider list;
-- `config/`, `routes/web.php` и `commands/console.php` остаются primary app model.
+- `config/`, `routes/web.php` и `commands/console.php` остаются primary app model;
+- команды с prefix `config:`, `route:` и `cache:` зарезервированы за framework core.
 
 ### Шаг 4. Register phase
 
@@ -266,7 +274,8 @@
 - registry single-assignment;
 - чтение registry до инициализации считается lifecycle error;
 - bootstrap intentionally fail-fast, если app seams (`routes/web.php`, `commands/console.php`) невалидны;
-- routes/commands files должны оставаться relative project paths и не могут escape-нуться за пределы `basePath`.
+- routes/commands files должны оставаться relative project paths и не могут escape-нуться за пределы `basePath`;
+- если существует route cache, HTTP bootstrap использует уже exportable `RouteIndex` и не требует `routes/web.php` в runtime path.
 
 ---
 
@@ -375,6 +384,11 @@ Fallback handler этого pipeline — `RouteHandler`.
 - читает `console.commands` из config;
 - загружает `commands/console.php` через scope-isolated `require` с project-bound path validation;
 - валидирует, что registrar callable;
+- добавляет встроенные framework commands:
+  - `config:cache`
+  - `route:cache`
+  - `cache:clear`
+- отклоняет прикладные команды с reserved prefixes `config:`, `route:`, `cache:`;
 - инициализирует `CommandRegistry`.
 
 ### Шаг 3. Parser contract
@@ -492,6 +506,13 @@ CLI path не делает дополнительной магии поверх 
 - `config/*.php`
 - environment overlays
 - container `bindings`, `singletons`, `aliases`
+- explicit cache files в `var/cache/framework/`
+
+Cache-specific contract:
+
+- `config:cache` принимает только exportable config values;
+- cache-safe container definitions ограничены class-string и exportable static callable references;
+- closure/object service definitions остаются допустимы только в uncached mode.
 
 ### HTTP
 
@@ -500,10 +521,17 @@ CLI path не делает дополнительной магии поверх 
 - route middleware
 - handlers
 
+Route cache contract:
+
+- `route:cache` принимает только class-string handlers;
+- route middleware в cached mode должны быть class-string'ами middleware classes;
+- closure handlers и instance-based route middleware остаются допустимы только в uncached mode.
+
 ### CLI
 
 - `commands/console.php`
 - class commands в `app/Console/`
+- framework internal commands `config:cache`, `route:cache`, `cache:clear`
 
 Это сделано специально: система должна оставаться реконструируемой.
 

@@ -25,11 +25,12 @@
 Поверх shared core уже реализованы:
 
 - `.env` bootstrap и multi-file config с environment overlays;
+- explicit `config:cache`, `route:cache`, `cache:clear` pipeline через `var/cache/framework/`;
 - explicit DI container без autowiring;
-- HTTP routing с static/dynamic routes, named routes, route groups и URL generation;
+- HTTP routing с precompiled `RouteIndex`, static/dynamic routes, named routes, route groups и URL generation;
 - global и route-level middleware;
 - единый HTTP error boundary с controlled `HttpException` hierarchy;
-- minimal CLI kernel с explicit command registration через `commands/console.php`;
+- minimal CLI kernel с explicit command registration через `commands/console.php` и встроенными framework cache commands;
 - deterministic CLI parser:
   - `command`
   - positional args
@@ -81,6 +82,11 @@
 - HTTP: [`public/index.php`](/C:/OSPanel/home/framework.ru/public/index.php)
 - CLI: [`bin/console`](/C:/OSPanel/home/framework.ru/bin/console)
 - Example command: `php bin/console app:about`
+- Cache commands:
+  - `php bin/console config:cache`
+  - `php bin/console route:cache`
+  - `php bin/console cache:clear`
+- Perf harness: `php tools/perf/benchmark.php [bootstrap|registration|routing|all]`
 
 ## Как читать проект
 
@@ -91,18 +97,21 @@
    - [`src/Foundation/ApplicationFactory.php`](/C:/OSPanel/home/framework.ru/src/Foundation/ApplicationFactory.php)
    - [`src/Foundation/ConsoleApplicationFactory.php`](/C:/OSPanel/home/framework.ru/src/Foundation/ConsoleApplicationFactory.php)
    - [`src/Foundation/Bootstrap/Bootstrapper.php`](/C:/OSPanel/home/framework.ru/src/Foundation/Bootstrap/Bootstrapper.php)
+   - [`src/Config/ProjectConfigLoader.php`](/C:/OSPanel/home/framework.ru/src/Config/ProjectConfigLoader.php)
 3. HTTP path:
    - [`public/index.php`](/C:/OSPanel/home/framework.ru/public/index.php)
    - [`bootstrap/app.php`](/C:/OSPanel/home/framework.ru/bootstrap/app.php)
    - [`src/Foundation/Application.php`](/C:/OSPanel/home/framework.ru/src/Foundation/Application.php)
    - [`src/Http/RouteDispatcher.php`](/C:/OSPanel/home/framework.ru/src/Http/RouteDispatcher.php)
    - [`src/Routing/Router.php`](/C:/OSPanel/home/framework.ru/src/Routing/Router.php)
+   - [`src/Routing/RouteIndex.php`](/C:/OSPanel/home/framework.ru/src/Routing/RouteIndex.php)
 4. CLI path:
    - [`bin/console`](/C:/OSPanel/home/framework.ru/bin/console)
    - [`bootstrap/console.php`](/C:/OSPanel/home/framework.ru/bootstrap/console.php)
    - [`src/Console/ConsoleApplication.php`](/C:/OSPanel/home/framework.ru/src/Console/ConsoleApplication.php)
    - [`src/Console/ArgvInputFactory.php`](/C:/OSPanel/home/framework.ru/src/Console/ArgvInputFactory.php)
    - [`commands/console.php`](/C:/OSPanel/home/framework.ru/commands/console.php)
+   - [`src/Console/Internal/ConfigCacheCommand.php`](/C:/OSPanel/home/framework.ru/src/Console/Internal/ConfigCacheCommand.php)
 5. Калибровка через tests:
    - [`tests/Foundation/ApplicationFactoryTest.php`](/C:/OSPanel/home/framework.ru/tests/Foundation/ApplicationFactoryTest.php)
    - [`tests/Foundation/ConsoleApplicationFactoryTest.php`](/C:/OSPanel/home/framework.ru/tests/Foundation/ConsoleApplicationFactoryTest.php)
