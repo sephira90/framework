@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Framework\Config;
 
 use Framework\Foundation\Bootstrap\ConfiguredContainerConfigValidator;
+use Framework\Foundation\Bootstrap\FrameworkCacheMetadata;
 use Framework\Foundation\Bootstrap\FrameworkCachePaths;
 
 /**
@@ -33,6 +34,7 @@ final readonly class ConfigCacheCompiler
 
         $exportableItems = $this->assertExportableArray($items, 'config');
         $exportableItems['_framework'] = [
+            'cache' => FrameworkCacheMetadata::forType(FrameworkCacheMetadata::CONFIG_TYPE),
             'container_config' => $this->containerConfigValidator->validate($config->get('container', [])),
         ];
 

@@ -177,6 +177,14 @@ final readonly class RouteIndex
     }
 
     /**
+     * @return list<Route>
+     */
+    public function routes(): array
+    {
+        return $this->routes;
+    }
+
+    /**
      * @return array{
      *     routes: list<array{
      *         methods: list<string>,

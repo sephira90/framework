@@ -52,9 +52,9 @@ final class RoutesFileLoader
 
     private function loadCachedIndex(string $path): RouteIndex
     {
-        $index = IsolatedFileRequirer::require($path);
+        $cache = IsolatedFileRequirer::require($path);
 
-        if (!is_array($index)) {
+        if (!is_array($cache)) {
             throw new InvalidConfigurationException(sprintf(
                 'Routes cache file [%s] must return an array.',
                 $path
@@ -62,6 +62,22 @@ final class RoutesFileLoader
         }
 
         try {
+            /** @var array{cache?: mixed, index?: mixed} $cache */
+            FrameworkCacheMetadata::assertValid(
+                $cache['cache'] ?? null,
+                FrameworkCacheMetadata::ROUTES_TYPE,
+                $path
+            );
+
+            $index = $cache['index'] ?? null;
+
+            if (!is_array($index)) {
+                throw new InvalidConfigurationException(sprintf(
+                    'Routes cache file [%s] must contain a route index payload.',
+                    $path
+                ));
+            }
+
             /** @var array{
              *     routes: list<array{
              *         methods: list<string>,

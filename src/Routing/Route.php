@@ -102,6 +102,24 @@ final readonly class Route
         return $this->methods;
     }
 
+    /**
+     * Returns the effective HTTP methods visible at the routing boundary.
+     *
+     * Routes supporting `GET` implicitly support `HEAD`, so observability
+     * tools should display the expanded method set instead of only the raw
+     * registration input.
+     *
+     * @return list<string>
+     */
+    public function effectiveMethods(): array
+    {
+        if (!$this->allowsHeadFallback || $this->supportsMethod('HEAD')) {
+            return $this->methods;
+        }
+
+        return [...$this->methods, 'HEAD'];
+    }
+
     public function path(): string
     {
         return $this->path;

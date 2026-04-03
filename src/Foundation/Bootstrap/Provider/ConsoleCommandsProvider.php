@@ -8,7 +8,9 @@ use Framework\Console\CommandCollection;
 use Framework\Console\CommandRegistry;
 use Framework\Console\Internal\CacheClearCommand;
 use Framework\Console\Internal\ConfigCacheCommand;
+use Framework\Console\Internal\ConfigShowCommand;
 use Framework\Console\Internal\RouteCacheCommand;
+use Framework\Console\Internal\RouteListCommand;
 use Framework\Foundation\Bootstrap\BootableProviderInterface;
 use Framework\Foundation\Bootstrap\BootstrapBuilder;
 use Framework\Foundation\Bootstrap\BootstrapContext;
@@ -43,8 +45,16 @@ final readonly class ConsoleCommandsProvider implements ServiceProviderInterface
             new ConfigCacheCommand($builder->basePath())
         );
         $container->singleton(
+            ConfigShowCommand::class,
+            new ConfigShowCommand($builder->basePath())
+        );
+        $container->singleton(
             RouteCacheCommand::class,
             new RouteCacheCommand($builder->basePath())
+        );
+        $container->singleton(
+            RouteListCommand::class,
+            new RouteListCommand($builder->basePath())
         );
         $container->singleton(
             CacheClearCommand::class,
@@ -64,7 +74,9 @@ final readonly class ConsoleCommandsProvider implements ServiceProviderInterface
     {
         $commands = new CommandCollection();
         $commands->add('config:cache', ConfigCacheCommand::class);
+        $commands->add('config:show', ConfigShowCommand::class);
         $commands->add('route:cache', RouteCacheCommand::class);
+        $commands->add('route:list', RouteListCommand::class);
         $commands->add('cache:clear', CacheClearCommand::class);
 
         foreach ($applicationCommands->all() as $name => $handler) {

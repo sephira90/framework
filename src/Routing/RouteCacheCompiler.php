@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Framework\Routing;
 
 use Framework\Config\InvalidConfigurationException;
+use Framework\Foundation\Bootstrap\FrameworkCacheMetadata;
 use Framework\Foundation\Bootstrap\FrameworkCachePaths;
 use Psr\Http\Server\MiddlewareInterface;
 
@@ -15,30 +16,33 @@ final class RouteCacheCompiler
 {
     /**
      * @return array{
-     *     routes: list<array{
-     *         methods: list<string>,
-     *         path: string,
-     *         handler: string,
-     *         middleware: list<string>,
-     *         name: string|null,
-     *         compiled_path: array{
+     *     cache: array{type: non-empty-string, version: positive-int},
+     *     index: array{
+     *         routes: list<array{
+     *             methods: list<string>,
      *             path: string,
-     *             matching_regex: non-empty-string,
-     *             parameters: list<array{
-     *                 name: string,
-     *                 placeholder: string,
-     *                 constraint: string|null,
-     *                 validationRegex: non-empty-string|null
-     *             }>,
-     *             static: bool,
-     *             segment_count: int,
-     *             first_literal_segment: string|null
-     *         }
-     *     }>,
-     *     static_routes: array<string, array<string, int>>,
-     *     dynamic_literal_buckets: array<int, array<string, list<int>>>,
-     *     dynamic_wildcard_buckets: array<int, list<int>>,
-     *     named_routes: array<string, int>
+     *             handler: string,
+     *             middleware: list<string>,
+     *             name: string|null,
+     *             compiled_path: array{
+     *                 path: string,
+     *                 matching_regex: non-empty-string,
+     *                 parameters: list<array{
+     *                     name: string,
+     *                     placeholder: string,
+     *                     constraint: string|null,
+     *                     validationRegex: non-empty-string|null
+     *                 }>,
+     *                 static: bool,
+     *                 segment_count: int,
+     *                 first_literal_segment: string|null
+     *             }
+     *         }>,
+     *         static_routes: array<string, array<string, int>>,
+     *         dynamic_literal_buckets: array<int, array<string, list<int>>>,
+     *         dynamic_wildcard_buckets: array<int, list<int>>,
+     *         named_routes: array<string, int>
+     *     }
      * }
      */
     public function compile(RouteIndex $index): array
@@ -78,7 +82,10 @@ final class RouteCacheCompiler
             }
         }
 
-        return $export;
+        return [
+            'cache' => FrameworkCacheMetadata::forType(FrameworkCacheMetadata::ROUTES_TYPE),
+            'index' => $export,
+        ];
     }
 
     public function render(RouteIndex $index): string

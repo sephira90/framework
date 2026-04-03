@@ -25,6 +25,14 @@ final class ConsoleApplicationFactory
         return ContainerAccessor::get($container, ConsoleRuntime::class);
     }
 
+    public static function createRecoveryRuntime(string $basePath): ConsoleRuntime
+    {
+        $config = (new ProjectConfigLoader())->loadRecovery($basePath);
+        $container = self::bootstrapper()->bootstrap($basePath, $config);
+
+        return ContainerAccessor::get($container, ConsoleRuntime::class);
+    }
+
     private static function bootstrapper(): Bootstrapper
     {
         return new Bootstrapper([
