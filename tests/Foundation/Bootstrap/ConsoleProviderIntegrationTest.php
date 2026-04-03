@@ -60,8 +60,11 @@ final class ConsoleProviderIntegrationTest extends FrameworkTestCase
         self::assertSame($runtime->inputFactory(), $container->get(ArgvInputFactory::class));
         self::assertSame([
             'config:cache',
+            'config:show',
             'route:cache',
+            'route:list',
             'cache:clear',
+            'container:debug',
             'app:greet',
         ], $registry->commandNames());
     }

@@ -10,6 +10,7 @@ use Framework\Console\CommandRegistry;
 use Framework\Console\CommandResolver;
 use Framework\Console\ConsoleApplication;
 use Framework\Console\ConsoleErrorRenderer;
+use Framework\Container\ContainerEntryOwner;
 use Framework\Foundation\Bootstrap\BootstrapBuilder;
 use Framework\Foundation\Bootstrap\ContainerAccessor;
 use Framework\Foundation\Bootstrap\ServiceProviderInterface;
@@ -27,12 +28,19 @@ final class ConsoleKernelProvider implements ServiceProviderInterface
     {
         $container = $builder->containerBuilder();
 
-        $container->singleton(ArgvInputFactory::class, static fn (): ArgvInputFactory => new ArgvInputFactory());
+        $container->singleton(
+            ArgvInputFactory::class,
+            static fn (): ArgvInputFactory => new ArgvInputFactory(),
+            ContainerEntryOwner::Framework,
+            self::class
+        );
         $container->singleton(
             CommandResolver::class,
             static function (ContainerInterface $container): CommandResolver {
                 return new CommandResolver($container);
-            }
+            },
+            ContainerEntryOwner::Framework,
+            self::class
         );
         $container->singleton(
             ConsoleErrorRenderer::class,
@@ -40,7 +48,9 @@ final class ConsoleKernelProvider implements ServiceProviderInterface
                 $config = ContainerAccessor::get($container, Config::class);
 
                 return new ConsoleErrorRenderer((bool) $config->get('app.debug', false));
-            }
+            },
+            ContainerEntryOwner::Framework,
+            self::class
         );
         $container->singleton(
             ConsoleApplication::class,
@@ -50,7 +60,9 @@ final class ConsoleKernelProvider implements ServiceProviderInterface
                     ContainerAccessor::get($container, CommandResolver::class),
                     ContainerAccessor::get($container, ConsoleErrorRenderer::class)
                 );
-            }
+            },
+            ContainerEntryOwner::Framework,
+            self::class
         );
         $container->singleton(
             ConsoleRuntime::class,
@@ -59,7 +71,9 @@ final class ConsoleKernelProvider implements ServiceProviderInterface
                     ContainerAccessor::get($container, ConsoleApplication::class),
                     ContainerAccessor::get($container, ArgvInputFactory::class)
                 );
-            }
+            },
+            ContainerEntryOwner::Framework,
+            self::class
         );
     }
 }

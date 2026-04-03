@@ -26,7 +26,11 @@
 
 - `.env` bootstrap и multi-file config с environment overlays;
 - explicit `config:cache`, `route:cache`, `cache:clear` pipeline через `var/cache/framework/`;
-- explicit DI container без autowiring;
+- read-only observability commands:
+  - `config:show [path] [--source]`
+  - `route:list [--source]`
+  - `container:debug [id] [--source]`
+- explicit DI container без autowiring и без silent overrides framework-owned ids;
 - HTTP routing с precompiled `RouteIndex`, static/dynamic routes, named routes, route groups и URL generation;
 - global и route-level middleware;
 - единый HTTP error boundary с controlled `HttpException` hierarchy;
@@ -84,8 +88,13 @@
 - Example command: `php bin/console app:about`
 - Cache commands:
   - `php bin/console config:cache`
+  - `php bin/console config:show`
   - `php bin/console route:cache`
+  - `php bin/console route:list`
   - `php bin/console cache:clear`
+  - `php bin/console container:debug`
+- Recovery note:
+  - `cache:clear` намеренно стартует через source config path, чтобы оставаться recovery-командой даже при несовместимом `config.php` cache snapshot
 - Perf harness: `php tools/perf/benchmark.php [bootstrap|registration|routing|all]`
 
 ## Как читать проект
@@ -136,4 +145,4 @@
 
 - `composer qa` — green
 - `composer test` — green
-- `98 tests / 290 assertions`
+- `144 tests / 534 assertions`

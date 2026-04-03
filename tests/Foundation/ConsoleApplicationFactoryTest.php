@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Framework\Tests\Foundation;
 
+use Framework\Config\Config;
 use Framework\Config\InvalidConfigurationException;
 use Framework\Console\ConsoleOutput;
 use Framework\Foundation\ConsoleApplicationFactory;
@@ -13,6 +14,8 @@ use Framework\Tests\Support\Fixtures\ExplodingCommand;
 use Framework\Tests\Support\Fixtures\GreetingCommand;
 use Framework\Tests\Support\Fixtures\MissingDependencyCommand;
 use Framework\Tests\Support\FrameworkTestCase;
+use InvalidArgumentException;
+use stdClass;
 
 /** @psalm-suppress UnusedClass */
 final class ConsoleApplicationFactoryTest extends FrameworkTestCase
@@ -255,6 +258,30 @@ PHP);
 
         $this->expectException(InvalidConfigurationException::class);
         $this->expectExceptionMessage('must return a callable registrar');
+
+        ConsoleApplicationFactory::createRuntime($basePath);
+    }
+
+    public function testConsoleApplicationFactoryRejectsApplicationOverridesOfFrameworkServices(): void
+    {
+        $basePath = $this->createTempDirectory();
+
+        $this->writeConfigFiles($basePath, false, 'commands/console.php', [
+            Config::class => stdClass::class,
+        ]);
+        $this->writeFile($basePath, 'commands/console.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+use Framework\Console\CommandCollector;
+
+return static function (CommandCollector $commands): void {
+};
+PHP);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('conflicts with existing definition');
 
         ConsoleApplicationFactory::createRuntime($basePath);
     }

@@ -93,6 +93,9 @@
 Отвечает за explicit dependency graph.
 
 - `ContainerBuilder` — регистрирует bindings, singletons и aliases
+- `ContainerInspectionSnapshot` — sidecar inspection model для observable registration graph без service resolution
+- `ContainerDefinitionDescriptor` / `ContainerAliasDescriptor` — typed descriptors container inspection layer
+- `ContainerEntryOwner` / `ContainerServiceLifecycle` / `ContainerDefinitionKind` — компактные enums observable container contract
 - `Container` — резолвит сервисы
 - `ServiceDefinition` — хранит factory, shared semantics и precomputed invocation mode
 - `ContainerException` / `NotFoundException` — ошибки контейнера
@@ -141,6 +144,7 @@
 - `ConsoleOutput` — testable adapter над stdout/stderr
 - `ConsoleErrorRenderer` — boundary-level CLI error rendering
 - `CommandInterface` — контракт app command
+- `Console\\Internal\\ConfigShowCommand` / `RouteListCommand` / `ContainerDebugCommand` — read-only observability commands для runtime/source views и container inspection
 
 ### `src/Foundation`
 
@@ -212,6 +216,16 @@
 - optional overlay `config/environments/<app.env>.php` применяется после базовой сборки;
 - `require` изолирован, поэтому config file не получает доступ к локальному scope loader'а;
 - config cache остаётся explicit snapshot: он может устареть относительно source files и `.env`, пока не будет явно перестроен.
+- runtime cache snapshot не принимается “на доверии”: loader валидирует cache type/version metadata до использования snapshot.
+
+### Bootstrap flow matrix
+
+| View | Config source | Route source | Notes |
+| --- | --- | --- | --- |
+| HTTP runtime | `ProjectConfigLoader::loadRuntime()` | `RoutesFileLoader::load()` | использует explicit cache snapshots, если они существуют |
+| CLI runtime | `ProjectConfigLoader::loadRuntime()` | n/a | framework commands и app commands делят тот же runtime config view |
+| Source inspection | `ProjectConfigLoader::loadSource()` | `RoutesFileLoader::loadSource()` | всегда bypass current cache snapshots |
+| Recovery CLI path | `ProjectConfigLoader::loadRecovery()` | n/a | используется для `cache:clear`, чтобы recovery не зависел от совместимости config cache |
 
 ### Шаг 3. Fixed provider order
 
@@ -238,7 +252,21 @@
 - providers internal-only;
 - приложение не конфигурирует provider list;
 - `config/`, `routes/web.php` и `commands/console.php` остаются primary app model;
-- команды с prefix `config:`, `route:` и `cache:` зарезервированы за framework core.
+- команды с prefix `config:`, `route:`, `cache:` и `container:` зарезервированы за framework core.
+
+### Provider ownership matrix
+
+- `SharedServicesProvider` владеет только truly shared bootstrap state:
+  - `Config`
+- `ConfiguredServicesProvider` владеет только user-defined container slice:
+  - validated container config
+  - application of bindings/singletons/aliases
+- `HttpCoreServicesProvider` владеет только HTTP-specific PSR-7/HTTP services
+- `RoutingServiceProvider` владеет только route boot state и `Router`
+- `ConsoleCommandsProvider` владеет только command boot state и framework-owned internal CLI commands
+- `ConsoleKernelProvider` владеет только CLI execution graph
+
+Это правило закрепляет checkpoint outcome: shared service не должен “жить понемногу везде”.
 
 ### Шаг 4. Register phase
 
@@ -253,9 +281,12 @@
 Инвариант:
 
 - container explicit-only;
+- duplicate definition ids и alias ids запрещены fail-fast;
+- app container slice не может silently shadow framework-owned ids или aliases;
 - alias cycles и service cycles считаются ошибкой;
 - service factory допускает либо zero-argument форму, либо один `ContainerInterface`-compatible параметр;
-- invocation mode factory (`requiresContainer`) вычисляется один раз при регистрации, а не в runtime hot path.
+- invocation mode factory (`requiresContainer`) вычисляется один раз при регистрации, а не в runtime hot path;
+- observable container snapshot собирается на register phase и не зависит от runtime service resolution.
 
 ### Шаг 6. Boot phase
 
@@ -386,10 +417,18 @@ Fallback handler этого pipeline — `RouteHandler`.
 - валидирует, что registrar callable;
 - добавляет встроенные framework commands:
   - `config:cache`
+  - `config:show`
   - `route:cache`
+  - `route:list`
   - `cache:clear`
-- отклоняет прикладные команды с reserved prefixes `config:`, `route:`, `cache:`;
+  - `container:debug`
+- отклоняет прикладные команды с reserved prefixes `config:`, `route:`, `cache:`, `container:`;
 - инициализирует `CommandRegistry`.
+
+Operational detail:
+
+- `bin/console cache:clear` bootstraps console runtime через recovery path на source config, чтобы несовместимый `config.php` cache snapshot не блокировал очистку кэша.
+- `container:debug` строит inspection snapshot через register phase того же console provider graph, но не резолвит service factories и не материализует runtime services.
 
 ### Шаг 3. Parser contract
 
@@ -470,7 +509,9 @@ CLI path не делает дополнительной магии поверх 
 - сервис либо зарегистрирован явно, либо его нет;
 - autowiring по умолчанию отсутствует;
 - singleton и transient semantics различаются явно;
-- container может вернуть только то, что было описано definitions graph.
+- container может вернуть только то, что было описано definitions graph;
+- observable container contract отделён от export contract и живёт как sidecar inspection snapshot;
+- framework и application registrations имеют явный ownership/origin в inspection view.
 
 ### Routing
 
@@ -486,7 +527,8 @@ CLI path не делает дополнительной магии поверх 
 - commands регистрируются явно;
 - command names trimmed, non-empty и уникальны;
 - `CommandRegistry` не допускает partial initialization;
-- parser contract узкий и детерминированный.
+- parser contract узкий и детерминированный;
+- `container:debug` наблюдает definitions/aliases без service resolution side effects.
 
 ### Foundation / Bootstrap
 
@@ -507,6 +549,7 @@ CLI path не делает дополнительной магии поверх 
 - environment overlays
 - container `bindings`, `singletons`, `aliases`
 - explicit cache files в `var/cache/framework/`
+- read-only container inspection через `container:debug`
 
 Cache-specific contract:
 
@@ -531,7 +574,13 @@ Route cache contract:
 
 - `commands/console.php`
 - class commands в `app/Console/`
-- framework internal commands `config:cache`, `route:cache`, `cache:clear`
+- framework internal commands:
+  - `config:cache`
+  - `config:show`
+  - `route:cache`
+  - `route:list`
+  - `cache:clear`
+  - `container:debug`
 
 Это сделано специально: система должна оставаться реконструируемой.
 
@@ -567,6 +616,10 @@ Route cache contract:
 ### Неправильный config
 
 Если config files отсутствуют, не читаются или возвращают не массивы, bootstrap ломается через `InvalidConfigurationException`.
+
+Если `var/cache/framework/config.php` существует, но содержит несовместимый cache type/version metadata, normal runtime bootstrap тоже ломается через `InvalidConfigurationException`; recovery path в этом случае — `bin/console cache:clear`.
+
+Если application container slice пытается переиспользовать framework-owned service id или alias id, bootstrap ломается fail-fast на registration phase, а не поздно в runtime resolution.
 
 ### Неправильный routes file
 
@@ -662,11 +715,11 @@ Route cache contract:
 5. прогнать `composer test`;
 6. зафиксировать шаг в `artifacts/execution/`.
 
-Текущий baseline после введения console kernel:
+Текущий baseline после cache/observability phase:
 
 - `composer qa` — green
 - `composer test` — green
-- `122 tests / 342 assertions`
+- `144 tests / 534 assertions`
 
 ---
 

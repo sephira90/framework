@@ -1,282 +1,217 @@
 # Refactoring Plan — Framework
 
-Дата актуализации: `2026-03-21`
+Дата актуализации: `2026-04-03`
 
 ---
 
 ## 1. Назначение документа
 
-Это не wishlist и не список всего, чего ещё нет.
+Это не wishlist и не каталог “всего, чего ещё нет”.
 
-Это живая карта инженерного состояния проекта:
+Это живая карта инженерного состояния ядра:
 
 - что уже стабилизировано;
-- какие реальные pressure points ещё остались;
-- куда имеет смысл двигаться дальше без platform drift.
+- где реально находятся текущие pressure points;
+- какие шаги дальше усиливают систему, а не размывают её.
 
 ---
 
 ## 2. Текущее состояние ядра
 
-**Framework core стабилизирован как shared bootstrap + two runtime axes.**
+**Framework core сейчас — это shared bootstrap layer, two runtime axes и explicit cache/runtime model.**
 
-Baseline:
+Система состоит из:
 
-- `composer qa` — green
-- `composer test` — green
-- `98 tests / 290 assertions`
+- HTTP runtime
+- Console runtime
+- shared bootstrap lifecycle
+- explicit config cache и route cache
+- read-only observability commands для source/runtime views
 
-Система сейчас выглядит так:
+Текущее ядро уже включает:
 
-```text
-HTTP
-public/index.php
-  -> bootstrap/app.php
-  -> ApplicationFactory::createRuntime()
-  -> Bootstrapper
-  -> HttpRuntime
+- stateless environment bootstrap;
+- multi-file config + environment overlays;
+- explicit `config:cache`, `route:cache`, `cache:clear`;
+- versioned cache metadata validation;
+- precompiled `RouteIndex` для routing hot path;
+- split validation/apply для configured container services;
+- minimal console kernel с explicit command registration;
+- observability commands:
+  - `config:show`
+  - `route:list`
+  - `container:debug`
 
-CLI
-bin/console
-  -> bootstrap/console.php
-  -> ConsoleApplicationFactory::createRuntime()
-  -> Bootstrapper
-  -> ConsoleRuntime
+---
 
-Shared bootstrap
-EnvironmentLoader
-  -> ConfigLoader
-  -> Bootstrapper
-     -> [register all providers]
-     -> [build container]
-     -> [boot bootable providers]
-```
+## 3. Что уже стабилизировано
 
-### Что уже работает
+### 3.1 Runtime assembly
 
-- PSR-7 / PSR-15 / PSR-11 boundaries
-- stateless environment bootstrap
-- multi-file config + environment overlays
-- explicit container без runtime reflection в factory hot path
-- HTTP routing:
-  - static and dynamic routes
+- `ApplicationFactory` и `ConsoleApplicationFactory` остаются thin orchestrators.
+- bootstrap lifecycle остаётся fixed-order и internal-only.
+- shared bootstrap не превратился в public provider platform.
+
+### 3.2 Config/runtime model
+
+- runtime читает config либо из source, либо из explicit snapshot;
+- cache snapshot не rebuild-ится автоматически;
+- stale cache считается допустимым operational state до явного rebuild;
+- incompatible config cache валидируется fail-fast по type/version metadata.
+
+### 3.3 Routing hot path
+
+- `RouteIndex` убрал плоский scan всех dynamic routes;
+- dynamic matching теперь bucketed по `segmentCount` и `firstLiteralSegment`;
+- route cache сохраняет compiled route index, а не сырой registration list;
+- routing contract сохранён:
+  - static priority
+  - `HEAD -> GET`
+  - `405 Allow`
   - named routes
   - URL generation
-  - route groups
-  - `HEAD -> GET` fallback
-  - correct `Allow` header semantics для `405`
-- HTTP error boundary с controlled `HttpException` hierarchy
-- CLI command runtime:
-  - explicit command registration
-  - deterministic argv parsing
-  - container-based class commands
-  - debug / non-debug console error boundary
+
+### 3.4 Console axis
+
+- commands регистрируются явно через `commands/console.php`;
+- framework-owned commands живут в том же runtime:
+  - `config:cache`
+  - `config:show`
+  - `route:cache`
+  - `route:list`
+  - `cache:clear`
+  - `container:debug`
+- reserved prefixes `config:`, `route:`, `cache:`, `container:` защищены.
+
+### 3.5 Container clarity
+
+- container registrations теперь сохраняют sidecar inspection snapshot на register phase;
+- definitions и aliases имеют явные `owner` и `origin`;
+- duplicate ids запрещены fail-fast;
+- application config не может silently shadow framework-owned ids;
+- `container:debug` показывает runtime/source container view без service resolution.
+
+### 3.6 Recovery semantics
+
+- `cache:clear` остаётся operational recovery path;
+- для этого `bin/console cache:clear` поднимается через source config recovery bootstrap и не зависит от совместимости `config.php` cache snapshot.
 
 ---
 
-## 3. Закрытые задачи
+## 4. Checkpoint outcome
 
-### 3.1 ApplicationFactory: God Object -> thin orchestrator
+Последний архитектурный checkpoint дал такой вывод:
 
-Ручная сборка runtime graph убрана из `ApplicationFactory`.
+- shared bootstrap остался действительно shared;
+- provider ownership можно формулировать жёстко и без двусмысленности;
+- runtime/cache model стала сложнее, но пока остаётся реконструируемой;
+- главный риск больше не routing performance, а hidden operational complexity вокруг source/runtime divergence и cache compatibility.
 
-### 3.2 Internal bootstrap providers
+Принятое правило ownership:
 
-Введён fixed internal lifecycle:
-
-- `ServiceProviderInterface`
-- `BootableProviderInterface`
-- `Bootstrapper`
-
-### 3.3 Reflection убрана из container hot path
-
-Factory invocation mode предвычисляется при регистрации.
-
-### 3.4 HEAD correctness
-
-- router поддерживает `HEAD -> GET`
-- `405 Allow` включает `HEAD`, если path поддерживает `GET`
-- response emitter умеет suppress body на transport boundary
-- полный flow покрыт integration tests
-
-### 3.5 EnvironmentLoader stateless
-
-Убран скрытый process-level path cache.
-
-### 3.6 Scope-isolated `require`
-
-`ConfigLoader`, `RoutesFileLoader` и `CommandsFileLoader` изолируют scope app files.
-
-### 3.7 Multi-file config
-
-`config/*.php` детерминированно мерджатся, затем может накладываться environment overlay.
-
-### 3.8 Routing capability layer
-
-Реализованы:
-
-- named routes
-- URL generation
-- route groups
-
-### 3.9 Controlled HTTP failures
-
-`HttpException` hierarchy даёт честный путь к `4xx/405` без обхода error boundary.
-
-### 3.10 Console kernel v0
-
-Реализован второй runtime axis:
-
-- `ConsoleApplicationFactory`
-- `ConsoleRuntime`
-- `CommandCollector` / `CommandRegistry`
-- `ArgvInputFactory`
-- `ConsoleApplication`
-- `ConsoleErrorRenderer`
-- `bin/console`
-- `commands/console.php`
-
-Ключевой результат: framework больше не HTTP-only, но при этом не превратился в plugin platform.
+- `SharedServicesProvider` владеет только truly shared state;
+- `ConfiguredServicesProvider` владеет только user container slice;
+- `HttpCoreServicesProvider` владеет только HTTP core;
+- `RoutingServiceProvider` владеет только route boot state и router;
+- `ConsoleCommandsProvider` владеет только command boot state и internal CLI commands;
+- `ConsoleKernelProvider` владеет только CLI execution graph.
 
 ---
 
-## 4. Активные точки давления
+## 5. Активные точки давления
 
 ### P3. `ReflectionClass::newInstance()` в `ContainerBuilder`
 
-**Где:** [`src/Container/ContainerBuilder.php`](/C:/OSPanel/home/framework.ru/src/Container/ContainerBuilder.php)
+Статус не изменился: это low-priority measured debt.
 
-После проверки конструктора локально кажется, что `new $class()` был бы проще.
-Но текущее toolchain-ограничение остаётся прежним:
+Трогать только при suppression-free решении, которое не ухудшает analyzability.
 
-- suppression-free вариант пока не найден;
-- Psalm начинает терять analyzability;
-- для этого проекта это хуже, чем маленький reflection tail.
+### P6. `BootstrapContext` и concrete `Container`
 
-**Статус:** accepted low-priority debt.
+Статус не изменился: low-priority design mismatch.
 
-**Серьёзность:** низкая.
+Трогать только при реальной потребности в более мягкой bootstrap abstraction.
 
----
+### P8. Новый bottleneck ещё не измерен
 
-### P6. `BootstrapContext` возвращает concrete `Container`
+После route/cache refactor и observability phase следующий performance шаг нельзя выбирать “по ощущению”.
 
-**Где:** [`src/Foundation/Bootstrap/BootstrapContext.php`](/C:/OSPanel/home/framework.ru/src/Foundation/Bootstrap/BootstrapContext.php)
+Нужно сначала получить новый measured signal:
 
-`container(): Container` жёстче, чем `ContainerInterface`.
-Пока это не operational problem, но это minor extensibility mismatch.
+- либо из perf harness;
+- либо из реальной operational деградации;
+- либо из profiling под более тяжёлым приложением.
 
-**Статус:** low-priority design debt.
+### P9. Cache format evolution теперь имеет цену совместимости
 
-**Серьёзность:** низкая.
+После ввода versioned metadata любое изменение cache shape — это уже не локальный refactor, а format change.
 
----
-
-### P7. Checkpoint после split runtime axes
-
-После введения CLI path система стала сильнее, но появился новый риск:
-
-- shared bootstrap может начать размываться;
-- provider graph для HTTP и CLI может начать дублироваться неструктурно;
-- config model может тихо расползтись в два почти независимых мира.
-
-Это не дефект текущего кода. Это системный checkpoint, который нужно пройти до следующей крупной capability.
-
-Что надо проверить:
-
-- не дублируются ли shared registrations между `HttpCoreServicesProvider` и `ConsoleKernelProvider`;
-- не начал ли bootstrap слой превращаться в скрытый второй framework внутри framework;
-- остаётся ли app model простой:
-  - `config/`
-  - `routes/web.php`
-  - `commands/console.php`
-
-**Статус:** следующий обязательный архитектурный шаг.
-
-**Серьёзность:** средняя.
+Это нужно держать под контролем и не делать без причины.
 
 ---
 
-## 5. Что сознательно не входит в текущий plan
+## 6. Что сознательно не входит в ближайший горизонт
 
-Ниже перечислены отсутствующие компоненты, которые не считаются дефектами ядра.
+По-прежнему не считаются следующим рациональным шагом:
 
-- public provider layer
+- public provider API
 - autowiring by default
-- PSR-14 events
+- events
 - attribute routing
-- named middleware aliases
-- auth/session/CSRF
+- auth/session/csrf
 - ORM / queue / scheduler
-- advanced console UX:
-  - short options
-  - interactive prompts
-  - ANSI styling
-  - signature DSL
-  - autodiscovery
+- advanced console UX
+- full compiled container
+
+Причина та же: они расширяют platform surface быстрее, чем усиливают текущую модель.
 
 ---
 
-## 6. Следующий план развития
+## 7. Следующий приоритетный горизонт
 
-### Фаза G. Закрыта: Console kernel v0
+### Немедленно
 
-Реализован минимальный CLI runtime без platform explosion.
+Не добавлять новую тяжёлую capability.
 
-Что важно:
+Сначала использовать и калибровать уже введённый observability layer:
 
-- CLI делит bootstrap, config и container с HTTP;
-- CLI не делит HTTP-specific runtime graph;
-- команды регистрируются явно;
-- framework не навязывает magic command model.
-
----
-
-### Следующий обязательный шаг: архитектурный checkpoint
-
-До следующей capability нужно ответить на три вопроса:
-
-1. Shared bootstrap действительно остался shared, или начался drift между HTTP и CLI?
-2. Не появился ли лишний слой сложности в provider lifecycle?
-3. Остаётся ли app model простой и реконструируемой?
-
-Это не теоретический ритуал. После split runtime axes без такого checkpoint очень легко пойти в feature accumulation и потерять управляемость core.
-
----
-
-### После checkpoint: наиболее рациональный следующий горизонт
-
-Если checkpoint зелёный, следующий сильный кандидат — не Events и не Auth stack, а read-only introspection commands поверх уже существующего CLI axis:
-
-- `route:list`
 - `config:show`
-- возможно `container:debug`
+- `route:list`
+- perf harness
+- execution logs
 
-Почему это сильнее, чем новый subsystem:
+### Ближайший сильный кандидат
 
-- reutilizes уже собранный console kernel;
-- даёт практическую ценность без новых внешних зависимостей;
-- усиливает observability и учебную реконструируемость системы;
-- не размывает архитектуру новой execution axis.
+После container clarity следующий сильный кандидат снова не heavy feature, а новый measured signal:
+
+- сначала использовать `container:debug`, `config:show`, `route:list` и perf harness как calibration layer;
+- только потом выбирать следующий structural step.
+
+### Альтернатива, если сигнал придёт из compatibility seams
+
+Если новый pressure point окажется в runtime/caching compatibility, следующим шагом должен быть не feature growth, а controlled cache format evolution:
+
+- version bump policy;
+- invalidation semantics;
+- rollback clarity.
 
 ---
 
-## 7. Приоритеты
+## 8. Приоритеты
 
 ```text
-Немедленно:   пройти архитектурный checkpoint после split runtime axes
-Опционально:  revisit P3 только при suppression-free решении
-Опционально:  revisit P6 только если появится реальная потребность в container abstraction на boot phase
-Потом:        выбрать следующую capability только после checkpoint
-Горизонт:     observability-oriented console commands, а не platform-heavy subsystems
+Сейчас:       стабилизировать и использовать observability layer
+Потом:        брать только новый measured signal, а не гадание о bottleneck
+Опционально:  controlled cache format evolution, если подтвердится compatibility pressure
+Не делать:    autowiring, events, public provider API, full compiled container
 ```
 
 ---
 
-## 8. Принципы, которые нельзя нарушать
+## 9. Принципы, которые нельзя нарушать
 
-1. Каждое существенное изменение проходит полный QA.
-2. Новая capability добавляется только после стабилизации предыдущей.
-3. Measured debt важнее optimization by suspicion.
-4. Internal bootstrap providers не становятся public extension API без отдельного решения.
-5. Документация, код и execution log должны оставаться синхронизированы.
+1. Каждый существенный шаг проходит полный QA.
+2. Cache/runtime complexity растёт только вместе с observability.
+3. Recovery path должен быть operationally real, а не декларативным.
+4. Export contract и inspection contract не смешиваются.
+5. Documentation, code и execution log должны оставаться синхронизированы.

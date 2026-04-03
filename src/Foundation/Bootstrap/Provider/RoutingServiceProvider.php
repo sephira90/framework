@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Framework\Foundation\Bootstrap\Provider;
 
+use Framework\Container\ContainerEntryOwner;
 use Framework\Foundation\Bootstrap\BootableProviderInterface;
 use Framework\Foundation\Bootstrap\BootstrapBuilder;
 use Framework\Foundation\Bootstrap\BootstrapContext;
@@ -30,14 +31,21 @@ final readonly class RoutingServiceProvider implements ServiceProviderInterface,
     {
         $container = $builder->containerBuilder();
 
-        $container->singleton(RouteRegistry::class, new RouteRegistry());
+        $container->singleton(
+            RouteRegistry::class,
+            new RouteRegistry(),
+            ContainerEntryOwner::Framework,
+            self::class
+        );
         $container->singleton(
             Router::class,
             static function (ContainerInterface $container): Router {
                 $registry = ContainerAccessor::get($container, RouteRegistry::class);
 
                 return new Router($registry->routes());
-            }
+            },
+            ContainerEntryOwner::Framework,
+            self::class
         );
     }
 

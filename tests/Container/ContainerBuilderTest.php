@@ -169,4 +169,37 @@ final class ContainerBuilderTest extends FrameworkTestCase
             }
         );
     }
+
+    public function testBuilderRejectsDuplicateDefinitionIdentifiers(): void
+    {
+        $builder = new ContainerBuilder();
+        $builder->bind('duplicate.service', stdClass::class);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('conflicts with existing definition');
+
+        $builder->singleton('duplicate.service', stdClass::class);
+    }
+
+    public function testBuilderRejectsDuplicateAliasIdentifiers(): void
+    {
+        $builder = new ContainerBuilder();
+        $builder->alias('alias.service', 'first.target');
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('conflicts with existing alias');
+
+        $builder->alias('alias.service', 'second.target');
+    }
+
+    public function testBuilderRejectsAliasesThatReuseDefinitionIdentifiers(): void
+    {
+        $builder = new ContainerBuilder();
+        $builder->singleton('shared.service', stdClass::class);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('conflicts with existing definition');
+
+        $builder->alias('shared.service', 'target.service');
+    }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Framework\Foundation\Bootstrap\Provider;
 
 use Framework\Foundation\Application;
+use Framework\Container\ContainerEntryOwner;
 use Framework\Foundation\Bootstrap\BootableProviderInterface;
 use Framework\Foundation\Bootstrap\BootstrapBuilder;
 use Framework\Foundation\Bootstrap\BootstrapContext;
@@ -38,18 +39,27 @@ final readonly class HttpKernelProvider implements ServiceProviderInterface, Boo
     {
         $container = $builder->containerBuilder();
 
-        $container->singleton(GlobalMiddlewareRegistry::class, new GlobalMiddlewareRegistry());
+        $container->singleton(
+            GlobalMiddlewareRegistry::class,
+            new GlobalMiddlewareRegistry(),
+            ContainerEntryOwner::Framework,
+            self::class
+        );
         $container->singleton(
             HandlerResolver::class,
             static function (ContainerInterface $container): HandlerResolver {
                 return new HandlerResolver($container);
-            }
+            },
+            ContainerEntryOwner::Framework,
+            self::class
         );
         $container->singleton(
             MiddlewareResolver::class,
             static function (ContainerInterface $container): MiddlewareResolver {
                 return new MiddlewareResolver($container);
-            }
+            },
+            ContainerEntryOwner::Framework,
+            self::class
         );
         $container->singleton(
             RouteDispatcher::class,
@@ -60,7 +70,9 @@ final readonly class HttpKernelProvider implements ServiceProviderInterface, Boo
                     ContainerAccessor::get($container, MiddlewareResolver::class),
                     ContainerAccessor::get($container, ErrorResponseFactory::class)
                 );
-            }
+            },
+            ContainerEntryOwner::Framework,
+            self::class
         );
         $container->singleton(
             Application::class,
@@ -72,7 +84,9 @@ final readonly class HttpKernelProvider implements ServiceProviderInterface, Boo
                     ContainerAccessor::get($container, MiddlewareResolver::class),
                     $middlewareRegistry->middleware()
                 );
-            }
+            },
+            ContainerEntryOwner::Framework,
+            self::class
         );
         $container->singleton(
             HttpRuntime::class,
@@ -82,7 +96,9 @@ final readonly class HttpKernelProvider implements ServiceProviderInterface, Boo
                     ContainerAccessor::get($container, RequestFactory::class),
                     ContainerAccessor::get($container, ResponseEmitter::class)
                 );
-            }
+            },
+            ContainerEntryOwner::Framework,
+            self::class
         );
     }
 

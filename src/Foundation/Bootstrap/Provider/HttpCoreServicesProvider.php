@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Framework\Foundation\Bootstrap\Provider;
 
 use Framework\Config\Config;
+use Framework\Container\ContainerEntryOwner;
 use Framework\Foundation\Bootstrap\BootstrapBuilder;
 use Framework\Foundation\Bootstrap\ContainerAccessor;
 use Framework\Foundation\Bootstrap\ServiceProviderInterface;
@@ -32,12 +33,42 @@ final class HttpCoreServicesProvider implements ServiceProviderInterface
     {
         $container = $builder->containerBuilder();
 
-        $container->singleton(Psr17Factory::class, static fn (): Psr17Factory => new Psr17Factory());
-        $container->alias(ResponseFactoryInterface::class, Psr17Factory::class);
-        $container->alias(StreamFactoryInterface::class, Psr17Factory::class);
-        $container->alias(ServerRequestFactoryInterface::class, Psr17Factory::class);
-        $container->alias(UriFactoryInterface::class, Psr17Factory::class);
-        $container->alias(UploadedFileFactoryInterface::class, Psr17Factory::class);
+        $container->singleton(
+            Psr17Factory::class,
+            static fn (): Psr17Factory => new Psr17Factory(),
+            ContainerEntryOwner::Framework,
+            self::class
+        );
+        $container->alias(
+            ResponseFactoryInterface::class,
+            Psr17Factory::class,
+            ContainerEntryOwner::Framework,
+            self::class
+        );
+        $container->alias(
+            StreamFactoryInterface::class,
+            Psr17Factory::class,
+            ContainerEntryOwner::Framework,
+            self::class
+        );
+        $container->alias(
+            ServerRequestFactoryInterface::class,
+            Psr17Factory::class,
+            ContainerEntryOwner::Framework,
+            self::class
+        );
+        $container->alias(
+            UriFactoryInterface::class,
+            Psr17Factory::class,
+            ContainerEntryOwner::Framework,
+            self::class
+        );
+        $container->alias(
+            UploadedFileFactoryInterface::class,
+            Psr17Factory::class,
+            ContainerEntryOwner::Framework,
+            self::class
+        );
         $container->singleton(
             RequestFactory::class,
             static function (ContainerInterface $container): RequestFactory {
@@ -46,9 +77,16 @@ final class HttpCoreServicesProvider implements ServiceProviderInterface
                 return new RequestFactory(
                     new ServerRequestCreator($factory, $factory, $factory, $factory)
                 );
-            }
+            },
+            ContainerEntryOwner::Framework,
+            self::class
         );
-        $container->singleton(ResponseEmitter::class, static fn (): ResponseEmitter => new ResponseEmitter());
+        $container->singleton(
+            ResponseEmitter::class,
+            static fn (): ResponseEmitter => new ResponseEmitter(),
+            ContainerEntryOwner::Framework,
+            self::class
+        );
         $container->singleton(
             ErrorResponseFactory::class,
             static function (ContainerInterface $container): ErrorResponseFactory {
@@ -59,7 +97,9 @@ final class HttpCoreServicesProvider implements ServiceProviderInterface
                     ContainerAccessor::get($container, StreamFactoryInterface::class),
                     (bool) $config->get('app.debug', false)
                 );
-            }
+            },
+            ContainerEntryOwner::Framework,
+            self::class
         );
         $container->singleton(
             ErrorHandlingMiddleware::class,
@@ -67,7 +107,9 @@ final class HttpCoreServicesProvider implements ServiceProviderInterface
                 return new ErrorHandlingMiddleware(
                     ContainerAccessor::get($container, ErrorResponseFactory::class)
                 );
-            }
+            },
+            ContainerEntryOwner::Framework,
+            self::class
         );
     }
 }
